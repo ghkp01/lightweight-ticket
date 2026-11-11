@@ -1,0 +1,36 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5433/mes_test?currentSchema=public
+    username: mes
+    password: mes
+    hikari:
+      maximum-pool-size: 10
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    placeholder-replacement: false
+  main:
+    banner-mode: off
+
+flowable:
+  database-schema-update: true
+  async-executor-activate: false
+  history-level: audit
+  check-process-definitions: false
+  idm:
+    enabled: false
+
+mes:
+  dashboard:
+    cache-ms: 0
+  overview:
+    cache-ms: 0
+  approval:
+    webhook:
+      enabled: false
+
+logging:
+  level:
+    root: WARN
+    com.mes: INFO
+    org.flowable: WARN

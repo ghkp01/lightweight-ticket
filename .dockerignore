@@ -1,0 +1,39 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE / 编辑器
+.idea
+.vscode
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings
+
+# 构建产物（在容器内重新构建）
+mes-frontend/node_modules
+mes-frontend/dist
+mes-backend/target
+mes-backend/src/main/resources/static
+
+# 本地环境与密钥
+.env
+.env.local
+.env.*.local
+
+# 日志
+logs/
+*.log
+*.log.gz
+
+# 操作系统
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# 文档与截图（镜像不需要）
+screenshots/
+*.md

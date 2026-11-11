@@ -1,0 +1,61 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: mes-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-mes}
+      POSTGRES_USER: ${POSTGRES_USER:-mes}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: Asia/Shanghai
+    # 数据库只在 compose 内网可达，不对外暴露端口（如需本机连，另开端口映射）
+    volumes:
+      - mes_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mes} -d ${POSTGRES_DB:-mes}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - mes-net
+
+  mes:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mes-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_URL: jdbc:postgresql://mes-postgres:5432/${POSTGRES_DB:-mes}
+      DB_USER: ${POSTGRES_USER:-mes}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      MES_CORS_ORIGINS: ${MES_CORS_ORIGINS:-*}
+      MES_INIT_PASSWORD: ${MES_INIT_PASSWORD}
+      MES_FORCE_PASSWORD_CHANGE: ${MES_FORCE_PASSWORD_CHANGE:-true}
+      LOG_PATH: /app/logs
+      TZ: Asia/Shanghai
+    ports:
+      - "8080:8080"
+    volumes:
+      - mes_logs:/app/logs
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 90s
+      retries: 3
+    networks:
+      - mes-net
+
+volumes:
+  mes_pgdata:
+  mes_logs:
+
+networks:
+  mes-net:
+    driver: bridge

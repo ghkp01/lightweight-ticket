@@ -1,0 +1,167 @@
+{
+  "easycom": {
+    "autoscan": true
+  },
+  "pages": [
+    {
+      "path": "pages/login/login",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "登录",
+        "backgroundColor": "#0b1220"
+      }
+    },
+    {
+      "path": "pages/home/home",
+      "style": {
+        "navigationBarTitleText": "工作台",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/workorder/list",
+      "style": {
+        "navigationBarTitleText": "生产工单",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 80
+      }
+    },
+    {
+      "path": "pages/workorder/detail",
+      "style": {
+        "navigationBarTitleText": "工单详情"
+      }
+    },
+    {
+      "path": "pages/scan/scan",
+      "style": {
+        "navigationBarTitleText": "扫码作业"
+      }
+    },
+    {
+      "path": "pages/inbound/list",
+      "style": {
+        "navigationBarTitleText": "入库申请",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 80
+      }
+    },
+    {
+      "path": "pages/inbound/create",
+      "style": {
+        "navigationBarTitleText": "新建入库申请"
+      }
+    },
+    {
+      "path": "pages/outbound/list",
+      "style": {
+        "navigationBarTitleText": "出库申请",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 80
+      }
+    },
+    {
+      "path": "pages/outbound/create",
+      "style": {
+        "navigationBarTitleText": "新建出库申请"
+      }
+    },
+    {
+      "path": "pages/quality/list",
+      "style": {
+        "navigationBarTitleText": "质量检验",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 80
+      }
+    },
+    {
+      "path": "pages/quality/create",
+      "style": {
+        "navigationBarTitleText": "新建检验单"
+      }
+    },
+    {
+      "path": "pages/quality/detail",
+      "style": {
+        "navigationBarTitleText": "检验单详情"
+      }
+    },
+    {
+      "path": "pages/defect/list",
+      "style": {
+        "navigationBarTitleText": "不良处置",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/notice/list",
+      "style": {
+        "navigationBarTitleText": "通知中心",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/profile/profile",
+      "style": {
+        "navigationBarTitleText": "我的"
+      }
+    },
+    {
+      "path": "pages/offline/list",
+      "style": {
+        "navigationBarTitleText": "离线待同步"
+      }
+    },
+    {
+      "path": "pages/product/detail",
+      "style": {
+        "navigationBarTitleText": "产品档案"
+      }
+    },
+    {
+      "path": "pages/shipment/detail",
+      "style": {
+        "navigationBarTitleText": "发货单"
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "智造工单 MES",
+    "navigationBarBackgroundColor": "#111827",
+    "backgroundColor": "#f3f4f6",
+    "backgroundTextStyle": "dark"
+  },
+  "tabBar": {
+    "color": "#94a3b8",
+    "selectedColor": "#f97316",
+    "backgroundColor": "#111827",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/home/home",
+        "text": "工作台",
+        "iconPath": "static/tabbar/home.png",
+        "selectedIconPath": "static/tabbar/home-active.png"
+      },
+      {
+        "pagePath": "pages/workorder/list",
+        "text": "工单",
+        "iconPath": "static/tabbar/work.png",
+        "selectedIconPath": "static/tabbar/work-active.png"
+      },
+      {
+        "pagePath": "pages/scan/scan",
+        "text": "扫码",
+        "iconPath": "static/tabbar/scan.png",
+        "selectedIconPath": "static/tabbar/scan-active.png"
+      },
+      {
+        "pagePath": "pages/profile/profile",
+        "text": "我的",
+        "iconPath": "static/tabbar/user.png",
+        "selectedIconPath": "static/tabbar/user-active.png"
+      }
+    ]
+  }
+}

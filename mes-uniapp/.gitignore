@@ -1,0 +1,16 @@
+# dependencies
+node_modules/
+
+# uni-app build outputs
+dist/
+unpackage/
+
+# local env
+.env.local
+.env.*.local
+
+# os / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

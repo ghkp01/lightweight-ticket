@@ -1,0 +1,19 @@
+{
+  "name": "智造工单 MES",
+  "short_name": "智造工单",
+  "description": "轻量 MES：销售、生产、排产、库存、质量与经营大屏",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#06131a",
+  "theme_color": "#0b1220",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
