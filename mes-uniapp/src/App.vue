@@ -552,13 +552,6 @@ textarea {
   line-height: 1.15;
 }
 
-.kpi-value small {
-  margin-left: 4rpx;
-  color: #94a3b8;
-  font-size: 21rpx;
-  font-weight: 500;
-}
-
 .kpi-foot {
   margin-top: 6rpx;
   color: #94a3b8;

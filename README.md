@@ -2,6 +2,80 @@
 
 面向中小制造企业的车间执行系统，把销售、生产、仓库、发货、质检、退货串成一条可追溯的交付链路。
 
+## 整体逻辑
+
+### 一句话
+销售订单是源头，生产工单是执行主线，库存是唯一事实账本；采购、质检、仓储、发货、财务都围绕这条主线留下可追溯的单据链。
+
+### 运行形态
+- **单进程 + 单数据库**：Spring Boot 一个 jar、PostgreSQL 一个库；前端构建后打进 jar 的 `static`，对外只暴露 8080 一个端口。
+- **启动即初始化**：Flyway 自动建表与迁移，启动类补齐演示账号与组织归属；新建库首次登录强制改密（`MES_FORCE_PASSWORD_CHANGE`，生产保持 `true`）。
+- **无状态服务**：业务数据在 PostgreSQL，附件落本地目录或 S3，日志落 `logs/`；应用可多实例部署，定时任务用数据库行锁保证同一时刻只有一个节点执行。
+- **三种部署形态**：Docker Compose 一条命令、Windows 本机一键脚本、已有 PostgreSQL + 手工 jar，见下文「一键部署」。
+
+### 业务主线
+
+```mermaid
+flowchart LR
+  A["客户 / 产品 / 供应商主数据"] --> B["销售报价"]
+  B --> C["销售订单"]
+  C --> D["BOM 任务 / 技术准备"]
+  C --> F["排产计划 / APS"]
+  D --> E["生产工单"]
+  F --> E
+  E --> G["物料需求 MRP"]
+  G --> H["采购申请 / 询价 / 采购订单"]
+  H --> I["采购入库 / 来料检验"]
+  I --> J["库存与批次"]
+  E --> K["生产领料 / 退料"]
+  K --> J
+  E --> L["工序报工 / 单件追溯 / 外协"]
+  L --> M["完工检验 / 成品入库"]
+  M --> J
+  J --> N["发货 / 签收"]
+  N --> C
+  N --> O["退货 / 返修"]
+  H --> P["应付 / 发票 / 付款"]
+  N --> Q["应收 / 开票 / 收款"]
+  I --> R["成本核算 / 月结"]
+  L --> R
+  K --> R
+```
+
+### 四条设计主线
+
+1. **订单驱动，快照隔离**：销售订单审核后转生产，工单的工序来自产品工艺路线、用料来自 BOM 快照；主数据后续修改不会倒改在制工单，保证已下达的单据可复现。
+2. **执行闭环，状态机推进**：排产 → 下达 → 领料 → 报工 → 完工检 → 入库 → 发货，每一步都生成单据或流水并推进单据状态；前道未完成不允许后道报工，不良会自动扣减后道计划量。
+3. **库存唯一入口**：所有入库、出库、领料、退料、调拨、盘点、发货、退货都经 `InventoryService` 写 `stock_txn`，并带 `ref_type + ref_no` 反查来源；扣减时行锁防并发超发。
+4. **财务与追溯一条链**：采购入库自动暂估 → 发票三单匹配 → 付款；发货形成应收；成本按「料 + 工 + 费」归集；批次号与件码贯穿来料、领用、报工、入库、发货。
+
+### 技术架构
+
+```mermaid
+flowchart TB
+  Client["PC 浏览器 / 车间大屏 / 移动端"] -->|"HTTP :8080"| App["Spring Boot 单体应用"]
+  App --> Sec["Spring Security + JWT"]
+  App --> Biz["业务模块：销售 / 计划 / 生产 / 仓储 / 采购 / 质量 / 财务"]
+  Biz --> Inv["InventoryService 唯一库存写入口"]
+  Biz --> Appr["Flowable 审批引擎"]
+  Biz --> Event["领域事件 Outbox"]
+  App --> PG["PostgreSQL 16"]
+  App --> Files["附件：本地目录或 S3"]
+  App --> Jobs["定时任务"]
+```
+
+### 模块地图
+
+| 领域 | 后端包 | 负责 |
+| --- | --- | --- |
+| 销售 | `sales` | 报价、销售订单、转生产、履约进度 |
+| 计划与执行 | `planning`、`production`、`workshop`、`andon` | BOM 任务、排产、工单、报工、单件、看板、安灯 |
+| 供应链 | `purchase`、`warehouse`、`inventory` | 申请/询价/采购、入库/出库/调拨/盘点/库位、库存账 |
+| 质量与追溯 | `quality`、`returns`、`trace` | 来料/过程/完工检、不良处置、退货返修、SPC、批次追溯 |
+| 交付 | `shipping`、`notice`、`task` | 发货签收、站内通知、全流程任务 |
+| 财务与成本 | `finance`、`cost`、`report` | 应付/应收/发票、料工费、成本报表、月结 |
+| 平台 | `auth`、`security`、`org`、`system`、`approval`、`integration`、`offline`、`job`、`file` | 登录权限、组织、配置、审批流、开放接口、离线队列、定时任务、附件 |
+
 ## 技术栈
 
 | 层 | 选型 |
@@ -113,15 +187,34 @@ mes/
 │  └─ src/main/resources/
 │     ├─ db/migration/           Flyway 建表与演示数据
 │     └─ static/                 前端打包产物
-├─ mes-frontend/                 Vue 3 前端
-├─ scripts/init-db.sql           手工建库脚本
-├─ Dockerfile                     多阶段构建（前端→后端 jar→运行时）
-├─ docker-compose.yml             PostgreSQL + 后端一键编排
-├─ .env.example                   环境变量模板（复制为 .env 后填写）
-└─ .dockerignore                  构建上下文排除规则
+├─ mes-frontend/                 Vue 3 前端（构建后嵌入后端 static）
+├─ mes-uniapp/                   uni-app 移动端（H5 / 微信小程序）
+├─ scripts/
+│  ├─ build.ps1                  前端构建 + 同步 static + 打包 jar
+│  ├─ deploy.ps1                 Windows 本机一键部署（构建 → 停旧 → 启动 → 健康检查）
+│  ├─ backup.ps1                 数据库 + 附件备份
+│  ├─ init-db.sql                手工建库脚本
+│  └─ e2e-*.py                   全流程回归脚本
+├─ docs/                         上线检查单、全流程测试指南
+├─ Dockerfile                    多阶段构建（前端 → 后端 jar → 运行时）
+├─ docker-compose.yml            PostgreSQL + 后端一键编排
+├─ .env.example                  环境变量模板（复制为 .env 后填写）
+└─ .dockerignore                 构建上下文排除规则
 ```
 
-## 快速启动
+## 一键部署
+
+按环境选一种。第一次部署建议先看上面的「整体逻辑 → 运行形态」。
+
+- 端口：应用固定监听 `8080`；前面可以再挂 Nginx / 网关做 HTTPS 与域名。
+- 依赖：Docker 方式只需要 Docker；本机脚本方式需要 JDK 25、Maven 3.9+、Node 20+、PostgreSQL 16。
+- 数据：PostgreSQL 存业务数据；附件默认落本地目录，日志落 `logs/`，升级前先做备份。
+
+| 方式 | 适用场景 | 入口 |
+| --- | --- | --- |
+| Docker Compose | 有 Docker 的 Linux / Windows，最省事 | `docker compose up -d --build` |
+| Windows 本机脚本 | 已装 JDK 25、Maven、Node、PostgreSQL | `scripts\deploy.ps1` |
+| 手工 jar | 已有 PostgreSQL，接入现有运维 / 堡垒机 | `java -jar mes-backend-1.0.0.jar` |
 
 ### 方式一：Docker Compose 一键部署（推荐）
 
@@ -140,9 +233,26 @@ docker compose up -d --build
 
 # 3. 查看启动日志，等 mes-app 健康
 docker compose logs -f mes
+
+# 4. 确认健康（看到 {"status":"UP"} 即可）
+curl -fsS http://localhost:8080/actuator/health
 ```
 
 启动后访问 `http://localhost:8080`，用 `admin` / `.env` 里的 `MES_INIT_PASSWORD` 登录。
+
+升级版本只需重新构建并滚动重启；数据在命名卷里，不会随容器重建丢失：
+
+```bash
+docker compose up -d --build
+docker compose down            # 停服务（保留数据卷）
+docker compose down -v         # 连数据卷一起删，慎用
+```
+
+| 卷 | 内容 |
+| --- | --- |
+| `mes_pgdata` | PostgreSQL 数据 |
+| `mes_logs` | 应用日志（`/app/logs`） |
+| `mes_data` | 附件（`/app/data/attachments`） |
 
 | 变量 | 默认值 | 必填 | 说明 |
 | --- | --- | --- | --- |
@@ -154,7 +264,50 @@ docker compose logs -f mes
 | `MES_CORS_ORIGINS` | `*` | 否 | 跨域允许源，生产填实际域名 |
 | `MES_FORCE_PASSWORD_CHANGE` | `true` | 否 | 首次登录是否强制改密 |
 
-### 方式二：已有 PostgreSQL，手动启动
+### 方式二：Windows 本机一键部署
+
+前置：JDK 25、Maven 3.9+、Node 20+、PostgreSQL 16 已启动，并且数据库 `mes` 已创建（`psql -U postgres -f scripts/init-db.sql`）。
+
+```powershell
+# 数据库连接按实际环境覆盖；不设则用 application.yml 的 localhost:5432/mes、mes/mes123
+$env:DB_URL='jdbc:postgresql://localhost:5432/mes?currentSchema=public'
+$env:DB_USER='mes'
+$env:DB_PASSWORD='mes123'
+
+# 一条命令：构建 → 停旧进程 → 启动 → 等健康检查
+powershell -ExecutionPolicy Bypass -File scripts\deploy.ps1
+```
+
+脚本做五件事：
+
+1. 调用 `scripts/build.ps1`：前端 `npm run build` → 同步到后端 `static` → `mvn package`；
+2. 找到并停掉 8080 上的旧进程；
+3. 后台启动 `mes-backend\target\mes-backend-1.0.0.jar`，输出写 `logs\app.out.log`；
+4. 轮询 `/actuator/health`，直到返回 `UP`；
+5. 打印访问地址、PID、日志位置，PID 同时写入 `logs\mes.pid`。
+
+常用参数：
+
+```powershell
+# 只重启，不重新构建
+powershell -ExecutionPolicy Bypass -File scripts\deploy.ps1 -SkipBuild
+
+# 构建时跑后端单元测试
+powershell -ExecutionPolicy Bypass -File scripts\deploy.ps1 -WithTests
+```
+
+停止服务：
+
+```powershell
+$appPid = Get-Content logs\mes.pid
+Stop-Process -Id $appPid -Force
+```
+
+本地演示如果不想被首次强制改密拦住，启动前加 `$env:MES_FORCE_PASSWORD_CHANGE='false'`；生产环境保持默认 `true`。
+
+> 生产环境再加 `$env:SPRING_PROFILES_ACTIVE='prod'`、`$env:JWT_SECRET`、`$env:MES_INIT_PASSWORD`、`$env:MES_CORS_ORIGINS`。`prod` 配置对必填项没有默认值，缺一个服务会直接启动失败。
+
+### 方式三：已有 PostgreSQL，手动启动（Linux / 自定义环境）
 
 ```bash
 psql -U postgres -f scripts/init-db.sql
@@ -169,17 +322,34 @@ psql -U postgres -f scripts/init-db.sql
 | `DB_PASSWORD` | `mes123` | 数据库密码 |
 | `JWT_SECRET` | 内置演示密钥 | 生产环境务必替换 |
 
+从源码构建时，**前端产物必须先同步到后端 `static` 再打包 jar**，否则访问到的还是旧页面：
+
+```bash
+cd mes-frontend
+npm ci
+npm run build
+rm -rf ../mes-backend/src/main/resources/static/*
+cp -r dist/* ../mes-backend/src/main/resources/static/
+
+cd ../mes-backend
+mvn clean package -DskipTests
+```
+
 启动后端（首次自动 Flyway 建表 + 写入演示数据）：
 
 ```bash
-cd mes-backend
-mvn clean package -DskipTests
-java -jar target/mes-backend-1.0.0.jar
+java -jar mes-backend/target/mes-backend-1.0.0.jar
+```
+
+Linux 常驻可配合 `nohup` 或 systemd：
+
+```bash
+nohup java -jar mes-backend/target/mes-backend-1.0.0.jar > logs/app.out.log 2>&1 &
 ```
 
 也可以直接 `mvn spring-boot:run`。启动后访问 <http://localhost:8080>。
 
-### 3. 前端开发模式（可选）
+### 前端开发模式（可选）
 
 ```bash
 cd mes-frontend
@@ -197,16 +367,20 @@ npm run build
 # 将 dist 内容复制到 mes-backend/src/main/resources/static 后重新打包后端
 ```
 
-这一步容易漏：只跑 `npm run build` 不会更新后端里的页面，因为 `static` 是构建产物目录，不会被自动覆盖。仓库里提供了 `scripts/build.ps1` 把「前端构建 → 同步 static → 打包 jar」串起来：
+这一步容易漏：只跑 `npm run build` 不会更新后端里的页面，因为 `static` 是构建产物目录，不会被自动覆盖。仓库提供两个脚本：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build.ps1          # 跳过测试
+# 推荐：构建 + 停旧进程 + 启动 + 健康检查
+powershell -ExecutionPolicy Bypass -File scripts\deploy.ps1
+
+# 只构建 jar，不启动
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1
 powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -WithTests  # 同时跑单元测试
 ```
 
-脚本会调用 PATH 上的 `npm` 与 `mvn`，并提示最终的 `java -jar` 启动命令。
+`build.ps1` 负责「前端构建 → 同步 static → 打包 jar」；`deploy.ps1` 在它之上再做停旧、启动和健康检查，是日常发版的入口。
 
-### 4. 移动端（uni-app）
+### 移动端（uni-app）
 
 ```bash
 cd mes-uniapp
@@ -279,6 +453,8 @@ powershell -ExecutionPolicy Bypass -File scripts\backup.ps1 -BackupDir D:\mes-ba
 5. 冒烟：登录 → 工单列表 → 车间扫码报一次工 → 大屏能开
 
 回滚两步：换回旧 jar + 从 dump 恢复库。
+
+Windows 本机日常发版可以直接用 `scripts\deploy.ps1`，它会自动完成「构建 → 停旧 → 启动 → 健康检查」，但**不包含备份**，升级前仍要先跑 `scripts\backup.ps1`。
 
 **为什么必须备份再升级**：Flyway 迁移没有 undo，脚本执行过就回不去了，唯一可靠的退路就是升级前那份 dump。升级脚本里如果要删列或改类型，风险更高，这时更要在测试库先跑一遍。
 

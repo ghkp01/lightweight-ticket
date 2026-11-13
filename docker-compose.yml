@@ -43,6 +43,8 @@ services:
       - "8080:8080"
     volumes:
       - mes_logs:/app/logs
+      # 附件默认落 data/attachments（storage.local.root），必须挂卷，否则重建容器会丢附件
+      - mes_data:/app/data
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
       interval: 30s
@@ -55,6 +57,7 @@ services:
 volumes:
   mes_pgdata:
   mes_logs:
+  mes_data:
 
 networks:
   mes-net:
