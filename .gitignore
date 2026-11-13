@@ -19,6 +19,19 @@ mes-backend/logs/
 *.log
 *.log.gz
 
+# JVM 崩溃与回放日志（可能含运行时内存信息，不要提交）
+hs_err_pid*.log
+replay_pid*.log
+*.hprof
+
+# 本地数据库备份、附件打包（含业务数据，不要提交）
+backups/
+*.dump
+
+# 页面截图与临时截图（README / docs 未引用，不再跟踪）
+screenshots/
+.screenshots/
+
 # ide
 .idea/
 .vscode/
