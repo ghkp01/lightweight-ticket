@@ -2,6 +2,7 @@ package com.mes.masterdata;
 
 import com.mes.common.BizException;
 import com.mes.common.CodeGenerator;
+import com.mes.common.PageResult;
 import com.mes.masterdata.api.BomLineInfo;
 import com.mes.masterdata.api.CustomerInfo;
 import com.mes.masterdata.api.MasterDataPort;
@@ -289,6 +290,25 @@ public class MasterDataService implements MasterDataPort {
                 """, like, like, like);
     }
 
+    /** 客户列表分页：客户量会随业务增长，列表页改为后端分页 */
+    public PageResult customerPage(String keyword, int page, int size) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 200);
+        String like = "%" + (keyword == null ? "" : keyword.trim()) + "%";
+        Long total = jdbcTemplate.queryForObject("""
+                select count(*) from customer
+                where (code ilike ? or name ilike ? or contact ilike ?)
+                """, Long.class, like, like, like);
+        List<Map<String, Object>> records = jdbcTemplate.queryForList("""
+                select id, code, name, contact, phone, address, level, enabled,
+                       to_char(created_at, 'YYYY-MM-DD') as "createdAt"
+                from customer
+                where (code ilike ? or name ilike ? or contact ilike ?)
+                order by id desc limit ? offset ?
+                """, like, like, like, safeSize, (safePage - 1) * safeSize);
+        return new PageResult(records, total == null ? 0 : total, safePage, safeSize);
+    }
+
     public long createCustomer(CustomerRequest request) {
         return jdbcTemplate.queryForObject("""
                 insert into customer (code, name, contact, phone, address, level)
@@ -319,12 +339,32 @@ public class MasterDataService implements MasterDataPort {
 
     public List<Map<String, Object>> products(String keyword, String category,
                                               String customFieldKey, String customFieldValue) {
+        return queryProducts(keyword, category, customFieldKey, customFieldValue, null, null);
+    }
+
+    /** 产品列表分页：物料会持续增加，列表页改为后端分页 */
+    public PageResult productPage(String keyword, String category,
+                                  String customFieldKey, String customFieldValue,
+                                  int page, int size) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 200);
+        List<Object> countArgs = new ArrayList<>();
+        StringBuilder where = productWhere(keyword, category, customFieldKey, customFieldValue, countArgs);
+        Long total = jdbcTemplate.queryForObject(
+                "select count(*) from product p where 1 = 1 " + where, Long.class, countArgs.toArray());
+        List<Map<String, Object>> records = queryProducts(keyword, category, customFieldKey,
+                customFieldValue, safeSize, (safePage - 1) * safeSize);
+        return new PageResult(records, total == null ? 0 : total, safePage, safeSize);
+    }
+
+    private StringBuilder productWhere(String keyword, String category,
+                                       String customFieldKey, String customFieldValue, List<Object> args) {
         String like = "%" + (keyword == null ? "" : keyword.trim()) + "%";
-        String categoryFilter = (category == null || category.isBlank()) ? "" : " and p.category = ? ";
-        StringBuilder where = new StringBuilder(" and (p.code ilike ? or p.name ilike ?) ")
-                .append(categoryFilter);
-        List<Object> args = new ArrayList<>(List.of(like, like));
-        if (!categoryFilter.isEmpty()) {
+        StringBuilder where = new StringBuilder(" and (p.code ilike ? or p.name ilike ?) ");
+        args.add(like);
+        args.add(like);
+        if (category != null && !category.isBlank()) {
+            where.append(" and p.category = ? ");
             args.add(category);
         }
         if (customFieldKey != null && !customFieldKey.isBlank()
@@ -338,7 +378,15 @@ public class MasterDataService implements MasterDataPort {
             args.add(definition.fieldKey());
             args.add(customFieldValue.trim());
         }
-        String sql = """
+        return where;
+    }
+
+    private List<Map<String, Object>> queryProducts(String keyword, String category,
+                                                    String customFieldKey, String customFieldValue,
+                                                    Integer limit, Integer offset) {
+        List<Object> args = new ArrayList<>();
+        StringBuilder where = productWhere(keyword, category, customFieldKey, customFieldValue, args);
+        StringBuilder sql = new StringBuilder("""
                 select p.id, p.code, p.name, p.spec, p.category, p.unit, p.price, p.cost,
                        p.safety_stock as "safetyStock", p.loss_rate as "lossRate", p.enabled,
                        p.serial_managed as "serialManaged", p.trace_mode as "traceMode",
@@ -352,11 +400,15 @@ public class MasterDataService implements MasterDataPort {
                        p.ext_data::text as "extData"
                 from product p
                 left join rm_inventory i on i.product_id = p.id
-                where 1 = 1 %s
-                group by p.id
-                order by p.id
-                """.formatted(where);
-        List<Map<String, Object>> records = jdbcTemplate.queryForList(sql, args.toArray());
+                where 1 = 1
+                """);
+        sql.append(where).append(" group by p.id order by p.id ");
+        if (limit != null) {
+            sql.append(" limit ? offset ?");
+            args.add(limit);
+            args.add(offset);
+        }
+        List<Map<String, Object>> records = jdbcTemplate.queryForList(sql.toString(), args.toArray());
         List<CustomFieldService.FormField> customFields =
                 customFieldService.formDefinitions("product");
         for (Map<String, Object> record : records) {
@@ -665,6 +717,30 @@ public class MasterDataService implements MasterDataPort {
                 where (w.factory_org_id = ? or w.factory_org_id is null)
                 order by w.id
                 """, factory);
+    }
+
+    /** 仓库列表分页；不传 page 时仍走 warehouses() 返回全量 */
+    public PageResult pageWarehouses(int page, int size) {
+        int safePage = Math.max(1, page);
+        int safeSize = Math.max(1, Math.min(size, 200));
+        Long factory = orgScope.listFilter();
+        String where = factory == null ? "" : " where (w.factory_org_id = ? or w.factory_org_id is null) ";
+        Long total = factory == null
+                ? jdbcTemplate.queryForObject("select count(*) from warehouse w", Long.class)
+                : jdbcTemplate.queryForObject("select count(*) from warehouse w" + where,
+                        Long.class, factory);
+        List<Object> args = new ArrayList<>();
+        if (factory != null) {
+            args.add(factory);
+        }
+        args.add(safeSize);
+        args.add((long) (safePage - 1) * safeSize);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                select w.id, w.code, w.name, w.type, w.enabled,
+                       w.factory_org_id as "factoryOrgId", o.name as "factoryName"
+                from warehouse w left join sys_org o on o.id = w.factory_org_id
+                """ + where + " order by w.id limit ? offset ?", args.toArray());
+        return new PageResult(rows, total == null ? 0 : total, safePage, safeSize);
     }
 
     public long createWarehouse(WarehouseRequest request) {

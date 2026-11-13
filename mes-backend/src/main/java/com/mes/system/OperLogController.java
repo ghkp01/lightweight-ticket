@@ -29,7 +29,12 @@ public class OperLogController {
                             @RequestParam(required = false) String success,
                             @RequestParam(required = false) String from,
                             @RequestParam(required = false) String to,
-                            @RequestParam(required = false) Integer limit) {
+                            @RequestParam(required = false) Integer limit,
+                            @RequestParam(required = false) Integer page,
+                            @RequestParam(defaultValue = "20") int size) {
+        if (page != null) {
+            return ApiResponse.ok(service.page(module, operator, keyword, success, from, to, page, size));
+        }
         return ApiResponse.ok(service.list(module, operator, keyword, success, from, to, limit));
     }
 

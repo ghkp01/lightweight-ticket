@@ -2,6 +2,7 @@ package com.mes.process;
 
 import com.mes.common.BizException;
 import com.mes.common.CodeGenerator;
+import com.mes.common.PageResult;
 import com.mes.org.api.WorkCenterPort;
 import com.mes.process.api.ProcessPort;
 import com.mes.production.api.WorkOrderOperationPort;
@@ -55,29 +56,56 @@ public class ProcessService implements ProcessPort {
     }
 
     public List<Map<String, Object>> list(String keyword, Boolean enabled) {
+        return query(keyword, enabled, null, null);
+    }
+
+    /** 工序列表分页：工序会随工艺细化持续增加，列表页改为后端分页 */
+    public PageResult page(String keyword, Boolean enabled, int page, int size) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 200);
+        List<Object> countArgs = new ArrayList<>();
+        StringBuilder where = where(keyword, enabled, countArgs);
+        Long total = jdbcTemplate.queryForObject(
+                "select count(*) from process p " + where, Long.class, countArgs.toArray());
+        List<Map<String, Object>> records = query(keyword, enabled, safeSize, (safePage - 1) * safeSize);
+        return new PageResult(records, total == null ? 0 : total, safePage, safeSize);
+    }
+
+    private StringBuilder where(String keyword, Boolean enabled, List<Object> args) {
         String like = "%" + (keyword == null ? "" : keyword.trim()) + "%";
+        StringBuilder where = new StringBuilder(" where (p.code ilike ? or p.name ilike ?) ");
+        args.add(like);
+        args.add(like);
+        if (enabled != null) {
+            where.append(" and p.enabled = ? ");
+            args.add(enabled);
+        }
+        return where;
+    }
+
+    private List<Map<String, Object>> query(String keyword, Boolean enabled, Integer limit, Integer offset) {
+        List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder("""
                 select p.id, p.code, p.name, p.category, p.default_minutes as "defaultMinutes",
                        p.default_price as "defaultPrice", p.need_inspection as "needInspection",
                        p.enabled, p.remark, p.work_center_id as "workCenterId", p.inspection_mode as "inspectionMode",
                        (select count(*) from product_routing r where r.process_id = p.id) as "routingCount"
                 from process p
-                where (p.code ilike ? or p.name ilike ?)
                 """);
-        List<Object> args = new ArrayList<>();
-        args.add(like);
-        args.add(like);
-        if (enabled != null) {
-            sql.append(" and p.enabled = ? ");
-            args.add(enabled);
+        sql.append(where(keyword, enabled, args)).append(" order by p.id ");
+        if (limit != null) {
+            sql.append(" limit ? offset ?");
+            args.add(limit);
+            args.add(offset);
         }
-        sql.append(" order by p.id");
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql.toString(), args.toArray());
         // 工作中心名称/日产能归 org，工单工序数归 production：各要一份批量结果补上，别 join 别人的表
         List<Long> centerIds = rows.stream().map(row -> row.get("workCenterId"))
                 .filter(Number.class::isInstance).map(value -> ((Number) value).longValue()).distinct().toList();
         var centers = workCenters.centersByIds(centerIds);
-        Map<Long, Integer> operationCounts = workOrderOperations.operationCountByProcess();
+        // 只统计当前页的工序，避免每次翻页都全表 group by
+        List<Long> processIds = rows.stream().map(row -> ((Number) row.get("id")).longValue()).toList();
+        Map<Long, Integer> operationCounts = workOrderOperations.operationCounts(processIds);
         for (Map<String, Object> row : rows) {
             WorkCenterPort.WorkCenterInfo center = row.get("workCenterId") instanceof Number id
                     ? centers.get(id.longValue()) : null;
@@ -223,7 +251,7 @@ public class ProcessService implements ProcessPort {
         if (routing != null && routing > 0) {
             throw new BizException(1409, "该工序已被 " + routing + " 条工艺路线引用，不能删除，请改为停用");
         }
-        Integer ops = workOrderOperations.operationCountByProcess().get(id);
+        Integer ops = workOrderOperations.operationCounts(List.of(id)).get(id);
         if (ops != null && ops > 0) {
             throw new BizException(1409, "该工序已用于 " + ops + " 道工单工序，不能删除，请改为停用");
         }

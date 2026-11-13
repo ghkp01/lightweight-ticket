@@ -8,6 +8,9 @@ import { useTableView } from '../../composables/useTableView'
 
 const loading = ref(false)
 const rows = ref<any[]>([])
+const total = ref(0)
+const page = ref(1)
+const size = ref(20)
 
 // 表格视图：列显示 / 冻结 / 列宽按账号保存
 const table = useTableView({
@@ -25,7 +28,10 @@ const table = useTableView({
   ]
 })
 
-const reload = () => load()
+const reload = () => {
+  page.value = 1
+  load()
+}
 
 const dialog = ref(false)
 const editing = ref<any>(null)
@@ -64,10 +70,20 @@ const resetCycleMap: Record<string, string> = {
 const load = async () => {
   loading.value = true
   try {
-    rows.value = await api.get('/system/code-rules')
+    const data = await api.get('/system/code-rules', {
+      page: page.value,
+      size: size.value
+    })
+    rows.value = data?.records || []
+    total.value = data?.total || 0
   } finally {
     loading.value = false
   }
+}
+
+const changePage = (value: number) => {
+  page.value = value
+  load()
 }
 
 const openEdit = (row: any) => {
@@ -175,11 +191,19 @@ onMounted(async () => {
         </span>
         <div class="spacer"></div>
         <TableToolbar :table="table" export-api="/system/code-rules" export-name="编码规则" @applied="reload" />
-        <span class="toolbar-tip">共 {{ rows.length }} 条规则</span>
+        <span class="toolbar-tip">共 {{ total }} 条规则</span>
       </div>
 
       <div class="table-wrap">
-        <DataTable :table="table" :data="rows" :loading="loading">
+        <DataTable
+          :table="table"
+          :data="rows"
+          :loading="loading"
+          :total="total"
+          :page="page"
+          :size="size"
+          @page-change="changePage"
+        >
           <template #cell-biz="{ row }">
             <div class="biz-cell">
               <span class="biz-name">{{ row.bizName }}</span>

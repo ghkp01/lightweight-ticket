@@ -394,6 +394,13 @@ const openDetail = async (row: any) => {
   }
 }
 
+const loadCreditCandidates = async (keyword = '') => {
+  creditCandidates.value = (await api.get('/ap/credit-candidates', {
+    keyword: keyword || undefined,
+    limit: 20
+  })) || []
+}
+
 const openCredit = async () => {
   creditForm.relatedInvoiceId = null
   creditForm.invoiceNo = 'RC' + Date.now().toString().slice(-8)
@@ -401,7 +408,7 @@ const openCredit = async () => {
   creditForm.remark = ''
   creditForm.immediate = true
   creditForm.items = []
-  creditCandidates.value = (await api.get('/ap/credit-candidates')) || []
+  await loadCreditCandidates()
   creditDialog.value = true
 }
 
@@ -622,18 +629,18 @@ onMounted(async () => {
               placeholder="发票号 / 供应商 / 采购单号"
               clearable
               style="width: 250px"
-              @keyup.enter="load"
+              @keyup.enter="reload"
             />
             <ReferenceSelect v-model="supplierFilter" url="/suppliers/options"
-                             placeholder="全部供应商" style="width: 180px" @select="load" />
-            <el-select v-model="status" placeholder="全部状态" clearable style="width: 130px" @change="load">
+                             placeholder="全部供应商" style="width: 180px" @select="reload" />
+            <el-select v-model="status" placeholder="全部状态" clearable style="width: 130px" @change="reload">
               <el-option label="待匹配" value="DRAFT" />
               <el-option label="待付款" value="MATCHED" />
               <el-option label="部分付款" value="PARTIAL" />
               <el-option label="已付清" value="PAID" />
               <el-option label="已作废" value="CANCELLED" />
             </el-select>
-            <el-button type="primary" plain @click="load">查询</el-button>
+            <el-button type="primary" plain @click="reload">查询</el-button>
             <el-button plain @click="reset">重置</el-button>
             <div class="spacer"></div>
             <TableToolbar :table="table" export-api="/ap/invoices" export-name="发票与应付" @applied="reload" />
@@ -773,16 +780,16 @@ onMounted(async () => {
               placeholder="暂估号 / 入库单 / 采购单 / 供应商"
               clearable
               style="width: 270px"
-              @keyup.enter="loadAccruals"
+              @keyup.enter="reloadAccruals"
             />
             <ReferenceSelect v-model="accrualSupplier" url="/suppliers/options"
-                             placeholder="全部供应商" style="width: 180px" @select="loadAccruals" />
-            <el-select v-model="accrualStatus" placeholder="全部状态" clearable style="width: 130px" @change="loadAccruals">
+                             placeholder="全部供应商" style="width: 180px" @select="reloadAccruals" />
+            <el-select v-model="accrualStatus" placeholder="全部状态" clearable style="width: 130px" @change="reloadAccruals">
               <el-option label="未冲" value="OPEN" />
               <el-option label="部分冲" value="PARTIAL" />
               <el-option label="已冲完" value="MATCHED" />
             </el-select>
-            <el-button type="primary" plain @click="loadAccruals">查询</el-button>
+            <el-button type="primary" plain @click="reloadAccruals">查询</el-button>
             <div class="spacer"></div>
             <TableToolbar :table="accrualTable" export-api="/ap/accruals" export-name="采购暂估" @applied="reloadAccruals" />
             <span class="toolbar-tip">共 {{ accrualTotal }} 条暂估</span>
@@ -1056,7 +1063,11 @@ onMounted(async () => {
             <el-select
               v-model="creditForm.relatedInvoiceId"
               filterable
-              placeholder="只列出已匹配的蓝字发票"
+              remote
+              reserve-keyword
+              :remote-method="loadCreditCandidates"
+              @visible-change="(visible: boolean) => visible && loadCreditCandidates('')"
+              placeholder="输入发票号/供应商/采购单号搜索（仅已匹配蓝票）"
               style="width: 100%"
               @change="pickCreditInvoice"
             >

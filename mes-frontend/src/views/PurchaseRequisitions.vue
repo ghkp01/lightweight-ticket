@@ -51,8 +51,6 @@ const reload = () => {
   load()
 }
 
-const workOrders = ref<any[]>([])
-
 const dialog = ref(false)
 const editingId = ref<number | null>(null)
 const saving = ref(false)
@@ -60,6 +58,7 @@ const form = reactive({
   sourceType: 'MANUAL',
   department: '',
   workOrderId: null as any,
+  workOrderLabel: '',
   needDate: '',
   purpose: '',
   remark: '',
@@ -143,11 +142,6 @@ const load = async () => {
   }
 }
 
-const loadOptions = async () => {
-  const workData = await api.get('/work-orders', { page: 1, size: 100 })
-  workOrders.value = workData?.records || []
-}
-
 const blankItem = () => ({
   productId: null,
   productCode: '',
@@ -169,6 +163,7 @@ const openCreate = () => {
     sourceType: 'MANUAL',
     department: '',
     workOrderId: null,
+    workOrderLabel: '',
     needDate: '',
     purpose: '',
     remark: '',
@@ -187,6 +182,7 @@ const openEdit = async (row: any) => {
     sourceType: data.sourceType,
     department: data.department || '',
     workOrderId: data.workOrderId || null,
+    workOrderLabel: data.workOrderNo || '',
     needDate: data.needDate || '',
     purpose: data.purpose || '',
     remark: data.remark || '',
@@ -421,7 +417,6 @@ const reset = () => {
 
 onMounted(async () => {
   await table.load()
-  await loadOptions()
   // 从消息中心跳过来：按申请单号定位，状态清空避免已处理的申请搜不到
   const fromQuery = String(route.query.keyword || '').trim()
   if (fromQuery) {
@@ -472,9 +467,9 @@ onMounted(async () => {
           placeholder="申请单号 / 用途 / 申请人"
           clearable
           style="width: 230px"
-          @keyup.enter="load"
+          @keyup.enter="reload"
         />
-        <el-select v-model="status" placeholder="全部状态" clearable style="width: 130px" @change="load">
+        <el-select v-model="status" placeholder="全部状态" clearable style="width: 130px" @change="reload">
           <el-option label="草稿" value="DRAFT" />
           <el-option label="待审批" value="SUBMITTED" />
           <el-option label="已批准" value="APPROVED" />
@@ -483,13 +478,13 @@ onMounted(async () => {
           <el-option label="已驳回" value="REJECTED" />
           <el-option label="已取消" value="CANCELLED" />
         </el-select>
-        <el-select v-model="sourceType" placeholder="全部来源" clearable style="width: 130px" @change="load">
+        <el-select v-model="sourceType" placeholder="全部来源" clearable style="width: 130px" @change="reload">
           <el-option label="工单缺料" value="PRODUCTION" />
           <el-option label="库存补货" value="STOCK" />
           <el-option label="非生产" value="MANUAL" />
           <el-option label="紧急采购" value="URGENT" />
         </el-select>
-        <el-button type="primary" plain @click="load">查询</el-button>
+        <el-button type="primary" plain @click="reload">查询</el-button>
         <el-button plain @click="reset">重置</el-button>
         <div class="spacer"></div>
         <TableToolbar :table="table" export-api="/purchase-requisitions" export-name="采购申请" @applied="reload" />
@@ -619,14 +614,15 @@ onMounted(async () => {
             <el-input v-model="form.department" placeholder="如 计划部 / 生产部" />
           </el-form-item>
           <el-form-item v-if="form.sourceType === 'PRODUCTION'" label="关联工单">
-            <el-select v-model="form.workOrderId" filterable clearable style="width: 100%">
-              <el-option
-                v-for="item in workOrders"
-                :key="item.id"
-                :label="`${item.workNo} · ${item.productName}`"
-                :value="item.id"
-              />
-            </el-select>
+            <ReferenceSelect
+              v-model="form.workOrderId"
+              url="/work-orders/options"
+              :initial-label="form.workOrderLabel"
+              code-field="workNo"
+              label-field="productName"
+              placeholder="输入工单号或产品搜索"
+              @select="(work) => (form.workOrderLabel = work ? `${work.workNo} · ${work.productName}` : '')"
+            />
           </el-form-item>
           <el-form-item label="采购类别">
             <el-select v-model="form.category" style="width: 100%">

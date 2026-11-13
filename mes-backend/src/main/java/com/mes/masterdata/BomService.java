@@ -3,6 +3,7 @@ package com.mes.masterdata;
 import com.mes.approval.api.ApprovalPort;
 import com.mes.common.BizException;
 import com.mes.common.CodeGenerator;
+import com.mes.common.PageResult;
 import com.mes.masterdata.api.BomLineInfo;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -52,6 +53,41 @@ public class BomService {
     // ---------------------------------------------------------------- 查询
 
     public List<Map<String, Object>> list(String keyword, String status) {
+        return queryBoms(keyword, status, null, null);
+    }
+
+    /** 分页列表：BOM 版本会随审批不断累积，列表改为后端分页避免一次拉全表 */
+    public PageResult page(String keyword, String status, int page, int size) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 200);
+        List<Object> countArgs = new ArrayList<>();
+        StringBuilder where = bomWhere(keyword, status, countArgs);
+        Long total = jdbcTemplate.queryForObject("""
+                select count(*) from bom b join product p on p.id = b.product_id
+                """ + where, Long.class, countArgs.toArray());
+        List<Map<String, Object>> records =
+                queryBoms(keyword, status, safeSize, (safePage - 1) * safeSize);
+        return new PageResult(records, total == null ? 0 : total, safePage, safeSize);
+    }
+
+    private StringBuilder bomWhere(String keyword, String status, List<Object> args) {
+        StringBuilder sql = new StringBuilder(" where 1 = 1 ");
+        if (keyword != null && !keyword.isBlank()) {
+            sql.append(" and (p.code ilike ? or p.name ilike ? or b.bom_no ilike ?) ");
+            String like = "%" + keyword.trim() + "%";
+            args.add(like);
+            args.add(like);
+            args.add(like);
+        }
+        if (status != null && !status.isBlank()) {
+            sql.append(" and b.status = ? ");
+            args.add(status.trim().toUpperCase(Locale.ROOT));
+        }
+        return sql;
+    }
+
+    private List<Map<String, Object>> queryBoms(String keyword, String status, Integer limit, Integer offset) {
+        List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder("""
                 select b.id, b.bom_no as "bomNo", b.product_id as "productId",
                        p.code as "productCode", p.name as "productName", p.category, p.unit,
@@ -62,21 +98,14 @@ public class BomService {
                        (select count(*) from bom_item i where i.bom_id = b.id) as "lineCount"
                 from bom b
                 join product p on p.id = b.product_id
-                where 1 = 1
                 """);
-        List<Object> args = new ArrayList<>();
-        if (keyword != null && !keyword.isBlank()) {
-            String like = "%" + keyword.trim() + "%";
-            sql.append(" and (p.code ilike ? or p.name ilike ? or b.bom_no ilike ?) ");
-            args.add(like);
-            args.add(like);
-            args.add(like);
-        }
-        if (status != null && !status.isBlank()) {
-            sql.append(" and b.status = ? ");
-            args.add(status.trim().toUpperCase(Locale.ROOT));
-        }
+        sql.append(bomWhere(keyword, status, args));
         sql.append(" order by b.product_id, b.id desc ");
+        if (limit != null) {
+            sql.append(" limit ? offset ?");
+            args.add(limit);
+            args.add(offset);
+        }
         return jdbcTemplate.queryForList(sql.toString(), args.toArray());
     }
 

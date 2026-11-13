@@ -27,7 +27,12 @@ public class MonthCloseController {
     }
 
     @GetMapping("/stock")
-    public ApiResponse stock(@RequestParam(required = false) String month) {
+    public ApiResponse stock(@RequestParam(required = false) String month,
+                             @RequestParam(required = false) Integer page,
+                             @RequestParam(required = false) Integer size) {
+        if (page != null) {
+            return ApiResponse.ok(service.stockClosePage(month, page, size == null ? 20 : size));
+        }
         return ApiResponse.ok(service.stockClose(month));
     }
 

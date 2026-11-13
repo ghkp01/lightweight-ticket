@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { api } from '../../api'
 import { encryptPassword } from '../../utils/crypto'
 import DataTable from '../../components/DataTable.vue'
+import ReferenceSelect from '../../components/ReferenceSelect.vue'
 import TableToolbar from '../../components/TableToolbar.vue'
 import { useTableView } from '../../composables/useTableView'
 
@@ -14,8 +15,6 @@ const page = ref(1)
 const size = ref(20)
 const keyword = ref('')
 const roles = ref<any[]>([])
-const warehouses = ref<any[]>([])
-const orgs = ref<any[]>([])
 
 // 表格视图：列显示 / 冻结 / 列宽与默认筛选按账号保存
 const table = useTableView({
@@ -61,14 +60,13 @@ const form = reactive<any>({
   email: '',
   role: '',
   warehouseId: null,
+  warehouseName: '',
   orgId: null,
+  orgName: '',
   position: '',
   employeeNo: '',
   enabled: true
 })
-
-/** 组织下拉按层级缩进，方便看清工厂 / 车间 / 班组 */
-const orgLabel = (item: any) => `${'　'.repeat(Math.max(0, (item.level || 1) - 1))}${item.name}`
 
 const resetVisible = ref(false)
 const resetRow = ref<any>(null)
@@ -81,6 +79,12 @@ const skillUser = ref<any>(null)
 const skillSaving = ref(false)
 const skillLoading = ref(false)
 const skillRows = ref<any[]>([])
+const skillKeyword = ref('')
+const skillPage = ref(1)
+const skillSize = ref(20)
+const skillTotal = ref(0)
+/** 已勾选的工序：跨页保留，保存时按它提交，不依赖当前页数据 */
+const skillOwned = ref(new Map<number, string>())
 
 const levelOptions = [
   { value: 'JUNIOR', label: '初级' },
@@ -88,29 +92,72 @@ const levelOptions = [
   { value: 'SENIOR', label: '高级' }
 ]
 
-const openSkills = async (row: any) => {
-  skillUser.value = row
-  skillDrawer.value = true
+const loadSkillRows = async () => {
   skillLoading.value = true
   try {
-    const [processes, owned] = await Promise.all([
-      api.get('/processes', { enabled: true }),
-      api.get(`/system/users/${row.id}/skills`)
-    ])
-    const ownedMap = new Map<number, string>(
-      (owned || []).map((item: any) => [Number(item.processId), item.level || 'NORMAL'])
-    )
-    skillRows.value = (processes || []).map((process: any) => ({
+    const data = await api.get('/processes', {
+      enabled: true,
+      keyword: skillKeyword.value || undefined,
+      page: skillPage.value,
+      size: skillSize.value
+    })
+    const processes = Array.isArray(data) ? data : (data?.records || [])
+    skillTotal.value = Array.isArray(data) ? processes.length : (data?.total || 0)
+    skillRows.value = processes.map((process: any) => ({
       processId: process.id,
       code: process.code,
       name: process.name,
       inspectionMode: process.inspectionMode,
-      checked: ownedMap.has(Number(process.id)),
-      level: ownedMap.get(Number(process.id)) || 'NORMAL'
+      checked: skillOwned.value.has(Number(process.id)),
+      level: skillOwned.value.get(Number(process.id)) || 'NORMAL'
     }))
   } finally {
     skillLoading.value = false
   }
+}
+
+/** 勾选 / 取消勾选时同步到跨页选择表 */
+const syncSkill = (row: any) => {
+  if (row.checked) skillOwned.value.set(Number(row.processId), row.level || 'NORMAL')
+  else skillOwned.value.delete(Number(row.processId))
+}
+
+const changeSkillLevel = (row: any) => {
+  if (row.checked) skillOwned.value.set(Number(row.processId), row.level || 'NORMAL')
+}
+
+const searchSkills = () => {
+  skillPage.value = 1
+  loadSkillRows()
+}
+
+const changeSkillPage = (value: number) => {
+  skillPage.value = value
+  loadSkillRows()
+}
+
+const changeSkillSize = () => {
+  skillPage.value = 1
+  loadSkillRows()
+}
+
+const openSkills = async (row: any) => {
+  skillUser.value = row
+  skillDrawer.value = true
+  skillKeyword.value = ''
+  skillPage.value = 1
+  skillRows.value = []
+  skillOwned.value = new Map()
+  skillLoading.value = true
+  try {
+    const owned = await api.get(`/system/users/${row.id}/skills`)
+    skillOwned.value = new Map<number, string>(
+      (owned || []).map((item: any) => [Number(item.processId), item.level || 'NORMAL'])
+    )
+  } finally {
+    skillLoading.value = false
+  }
+  await loadSkillRows()
 }
 
 const saveSkills = async () => {
@@ -118,9 +165,7 @@ const saveSkills = async () => {
   skillSaving.value = true
   try {
     await api.put(`/system/users/${skillUser.value.id}/skills`, {
-      items: skillRows.value
-        .filter((row: any) => row.checked)
-        .map((row: any) => ({ processId: row.processId, level: row.level }))
+      items: [...skillOwned.value.entries()].map(([processId, level]) => ({ processId, level }))
     })
     ElMessage.success('技能已保存')
     skillDrawer.value = false
@@ -150,14 +195,7 @@ const search = () => {
 }
 
 const loadRefs = async () => {
-  const [roleData, warehouseData, orgData] = await Promise.all([
-    api.get('/system/roles'),
-    api.get('/warehouses'),
-    api.get('/orgs/options')
-  ])
-  roles.value = roleData
-  warehouses.value = warehouseData
-  orgs.value = orgData
+  roles.value = await api.get('/system/roles')
 }
 
 const openCreate = () => {
@@ -170,7 +208,9 @@ const openCreate = () => {
     email: '',
     role: roles.value[0]?.code || '',
     warehouseId: null,
+    warehouseName: '',
     orgId: null,
+    orgName: '',
     position: '',
     employeeNo: '',
     enabled: true
@@ -188,7 +228,9 @@ const openEdit = (row: any) => {
     email: row.email || '',
     role: row.role,
     warehouseId: row.warehouseId || null,
+    warehouseName: row.warehouseName || '',
     orgId: row.orgId || null,
+    orgName: row.orgName || '',
     position: row.position || '',
     employeeNo: row.employeeNo || '',
     enabled: row.enabled
@@ -393,14 +435,14 @@ onMounted(async () => {
             </el-select>
           </el-form-item>
           <el-form-item label="所属组织">
-            <el-select v-model="form.orgId" clearable filterable placeholder="选择工厂 / 车间 / 班组" style="width: 100%">
-              <el-option
-                v-for="item in orgs"
-                :key="item.id"
-                :label="orgLabel(item)"
-                :value="item.id"
-              />
-            </el-select>
+            <ReferenceSelect
+              v-model="form.orgId"
+              url="/orgs/options"
+              :initial-label="form.orgName"
+              clearable
+              placeholder="选择工厂 / 车间 / 班组"
+              @select="(item) => form.orgName = item ? item.name : ''"
+            />
           </el-form-item>
           <el-form-item label="岗位">
             <el-input v-model="form.position" placeholder="如 操作工 / 班组长 / 计划员" />
@@ -409,14 +451,14 @@ onMounted(async () => {
             <el-input v-model="form.employeeNo" placeholder="如 E0013，可留空" />
           </el-form-item>
           <el-form-item label="所属仓库">
-            <el-select v-model="form.warehouseId" clearable filterable placeholder="不限定" style="width: 100%">
-              <el-option
-                v-for="item in warehouses"
-                :key="item.id"
-                :label="item.code ? `${item.code} · ${item.name}` : item.name"
-                :value="item.id"
-              />
-            </el-select>
+            <ReferenceSelect
+              v-model="form.warehouseId"
+              url="/options/warehouses"
+              :initial-label="form.warehouseName"
+              clearable
+              placeholder="不限定，输入编码或名称搜索"
+              @select="(item) => form.warehouseName = item ? item.name : ''"
+            />
           </el-form-item>
           <el-form-item label="账号状态" class="full">
             <el-switch v-model="form.enabled" active-text="启用" inactive-text="停用" />
@@ -459,10 +501,23 @@ onMounted(async () => {
         一道工序谁都没配，视为不限制，任何人都能派。
       </div>
 
+      <div class="filter-bar">
+        <el-input
+          v-model="skillKeyword"
+          placeholder="工序编码 / 名称"
+          clearable
+          style="width: 220px"
+          @keyup.enter="searchSkills"
+        />
+        <el-button type="primary" plain @click="searchSkills">查询</el-button>
+        <div class="spacer"></div>
+        <span class="toolbar-tip">共 {{ skillTotal }} 道工序</span>
+      </div>
+
       <el-table v-loading="skillLoading" :data="skillRows" size="small" max-height="60vh">
         <el-table-column label="可做" width="70" align="center">
           <template #default="{ row }">
-            <el-checkbox v-model="row.checked" />
+            <el-checkbox v-model="row.checked" @change="syncSkill(row)" />
           </template>
         </el-table-column>
         <el-table-column prop="code" label="工序编码" width="110">
@@ -471,12 +526,29 @@ onMounted(async () => {
         <el-table-column prop="name" label="工序名称" min-width="140" />
         <el-table-column label="熟练度" width="130">
           <template #default="{ row }">
-            <el-select v-model="row.level" size="small" :disabled="!row.checked" style="width: 100%">
+            <el-select
+              v-model="row.level"
+              size="small"
+              :disabled="!row.checked"
+              style="width: 100%"
+              @change="changeSkillLevel(row)"
+            >
               <el-option v-for="item in levelOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </template>
         </el-table-column>
       </el-table>
+      <div class="pager">
+        <el-pagination
+          v-model:current-page="skillPage"
+          v-model:page-size="skillSize"
+          :total="skillTotal"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next"
+          @current-change="changeSkillPage"
+          @size-change="changeSkillSize"
+        />
+      </div>
 
       <template #footer>
         <el-button @click="skillDrawer = false">取消</el-button>

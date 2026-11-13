@@ -290,6 +290,44 @@ public class ProductionService implements WorkOrderPort {
         return new PageResult(records, total == null ? 0 : total, page, size);
     }
 
+    /** 引用选择专用：工单下拉只返回编号、产品与状态，status 支持逗号分隔多个 */
+    public List<Map<String, Object>> options(String keyword, String status, int limit) {
+        int size = Math.max(1, Math.min(limit, 50));
+        String like = "%" + (keyword == null ? "" : keyword.trim()) + "%";
+        List<Object> args = new ArrayList<>(List.of(like, like, like));
+        StringBuilder where = new StringBuilder("""
+                 where (w.work_no ilike ? or p.code ilike ? or p.name ilike ?)
+                """);
+        List<String> statuses = splitStatus(status);
+        if (!statuses.isEmpty()) {
+            where.append(" and w.status in (")
+                    .append(String.join(",", java.util.Collections.nCopies(statuses.size(), "?")))
+                    .append(") ");
+            args.addAll(statuses);
+        }
+        Long factoryFilter = orgScopeService.listFilter();
+        if (factoryFilter != null) {
+            where.append(" and (w.factory_org_id = ? or w.factory_org_id is null) ");
+            args.add(factoryFilter);
+        }
+        args.add(size);
+        return jdbcTemplate.queryForList("""
+                select w.id, w.work_no as "workNo", w.product_id as "productId",
+                       p.code as "productCode", p.name as "productName",
+                       w.plan_qty as "planQty", w.status
+                from work_order w
+                join rm_product p on p.id = w.product_id
+                """ + where + " order by w.id desc limit ?", args.toArray());
+    }
+
+    private static List<String> splitStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return List.of();
+        }
+        return java.util.Arrays.stream(status.split(","))
+                .map(String::trim).filter(item -> !item.isEmpty()).toList();
+    }
+
     public Map<String, Object> detail(long id) {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
                 select w.id, w.work_no as "workNo", w.sales_order_id as "salesOrderId", so.order_no as "orderNo",

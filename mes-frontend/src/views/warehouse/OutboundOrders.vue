@@ -57,11 +57,10 @@ const form = reactive<any>({
   warehouseId: null,
   warehouseLabel: '',
   workOrderId: null,
+  workOrderLabel: '',
   remark: '',
   items: []
 })
-
-const workOrders = ref<any[]>([])
 
 const detailDrawer = ref(false)
 const detail = ref<any>(null)
@@ -95,15 +94,6 @@ const load = async () => {
   }
 }
 
-const loadWorkOrders = async () => {
-  if (workOrders.value.length) return
-  const [released, inProgress] = await Promise.all([
-    api.get('/work-orders', { status: 'RELEASED', page: 1, size: 100 }),
-    api.get('/work-orders', { status: 'IN_PROGRESS', page: 1, size: 100 })
-  ])
-  workOrders.value = [...(released?.records || []), ...(inProgress?.records || [])]
-}
-
 const openCreate = async () => {
   editingId.value = null
   // 默认落到第一个原料仓，没有原料仓时取任意一个，不再整表加载仓库
@@ -115,10 +105,10 @@ const openCreate = async () => {
     warehouseId: first ? first.id : null,
     warehouseLabel: first ? (first.code ? `${first.code} · ${first.name}` : first.name) : '',
     workOrderId: null,
+    workOrderLabel: '',
     remark: '',
     items: [{ productId: null, productCode: '', productName: '', qty: 1 }]
   })
-  loadWorkOrders()
   drawer.value = true
 }
 
@@ -130,6 +120,7 @@ const openEdit = async (row: any) => {
     warehouseId: data.warehouseId,
     warehouseLabel: data.warehouseName || '',
     workOrderId: data.workOrderId || null,
+    workOrderLabel: data.workOrderNo || '',
     remark: data.remark || '',
     items: data.items.map((item: any) => ({
       productId: item.productId,
@@ -138,7 +129,6 @@ const openEdit = async (row: any) => {
       qty: Number(item.qty)
     }))
   })
-  loadWorkOrders()
   drawer.value = true
 }
 
@@ -243,19 +233,19 @@ onMounted(async () => {
 
     <div class="panel">
       <div class="filter-bar">
-        <el-input v-model="keyword" placeholder="出库单号" clearable style="width: 230px" @keyup.enter="load" />
-        <el-select v-model="type" placeholder="全部类型" clearable style="width: 140px" @change="load">
+        <el-input v-model="keyword" placeholder="出库单号" clearable style="width: 230px" @keyup.enter="reload" />
+        <el-select v-model="type" placeholder="全部类型" clearable style="width: 140px" @change="reload">
           <el-option label="手工出库" value="MANUAL" />
           <el-option label="报废出库" value="SCRAP" />
           <el-option label="其他出库" value="OTHER" />
           <el-option label="车间领用" value="ISSUE_OTHER" />
         </el-select>
-        <el-select v-model="status" placeholder="全部状态" clearable style="width: 140px" @change="load">
+        <el-select v-model="status" placeholder="全部状态" clearable style="width: 140px" @change="reload">
           <el-option label="草稿" value="DRAFT" />
           <el-option label="已完成" value="COMPLETED" />
           <el-option label="已取消" value="CANCELLED" />
         </el-select>
-        <el-button type="primary" plain @click="load">查询</el-button>
+        <el-button type="primary" plain @click="reload">查询</el-button>
         <div class="spacer"></div>
         <TableToolbar :table="table" export-api="/outbound-orders" export-name="出库单" @applied="reload" />
         <span class="toolbar-tip">共 {{ total }} 张出库单</span>
@@ -306,20 +296,16 @@ onMounted(async () => {
                              placeholder="输入仓库编码或名称搜索" />
           </el-form-item>
           <el-form-item label="关联工单" :required="form.type === 'ISSUE_OTHER'" class="full">
-            <el-select
+            <ReferenceSelect
               v-model="form.workOrderId"
-              filterable
-              clearable
-              placeholder="车间领用非 BOM 物料时必选，用于归集工单成本"
-              style="width: 100%"
-            >
-              <el-option
-                v-for="item in workOrders"
-                :key="item.id"
-                :label="`${item.workNo} · ${item.productName}`"
-                :value="item.id"
-              />
-            </el-select>
+              url="/work-orders/options"
+              :params="{ status: 'RELEASED,IN_PROGRESS' }"
+              :initial-label="form.workOrderLabel"
+              code-field="workNo"
+              label-field="productName"
+              placeholder="输入工单号或产品搜索（已下达/生产中）"
+              @select="(work) => (form.workOrderLabel = work ? `${work.workNo} · ${work.productName}` : '')"
+            />
           </el-form-item>
           <el-form-item label="备注" class="full">
             <el-input v-model="form.remark" placeholder="领用部门、报废原因等" />

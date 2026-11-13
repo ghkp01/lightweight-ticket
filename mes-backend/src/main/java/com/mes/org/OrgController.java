@@ -39,8 +39,10 @@ public class OrgController {
     }
 
     @GetMapping("/options")
-    public ApiResponse options() {
-        return ApiResponse.ok(service.options());
+    public ApiResponse options(@RequestParam(required = false) String keyword,
+                               @RequestParam(required = false) String type,
+                               @RequestParam(required = false) Integer limit) {
+        return ApiResponse.ok(service.options(keyword, type, limit));
     }
 
     @GetMapping("/{id}")
@@ -50,7 +52,12 @@ public class OrgController {
 
     @GetMapping("/{id}/members")
     public ApiResponse members(@PathVariable long id,
-                               @RequestParam(defaultValue = "false") boolean includeChildren) {
+                               @RequestParam(defaultValue = "false") boolean includeChildren,
+                               @RequestParam(required = false) Integer page,
+                               @RequestParam(required = false) Integer size) {
+        if (page != null) {
+            return ApiResponse.ok(service.membersPage(id, includeChildren, page, size == null ? 20 : size));
+        }
         return ApiResponse.ok(service.members(id, includeChildren));
     }
 

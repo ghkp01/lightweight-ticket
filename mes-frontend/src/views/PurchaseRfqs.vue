@@ -18,8 +18,6 @@ const keyword = ref('')
 const status = ref('')
 const summary = ref<any>({})
 
-const requisitions = ref<any[]>([])
-
 const detailDrawer = ref(false)
 const detail = ref<any>(null)
 const detailLoading = ref(false)
@@ -145,14 +143,6 @@ const load = async () => {
   }
 }
 
-const loadOptions = async () => {
-  const [approved, partial] = await Promise.all([
-    api.get('/purchase-requisitions', { status: 'APPROVED', size: 100 }),
-    api.get('/purchase-requisitions', { status: 'PARTIAL', size: 100 })
-  ])
-  requisitions.value = [...(approved?.records || []), ...(partial?.records || [])]
-}
-
 const openDetail = async (row: any) => {
   detailDrawer.value = true
   detailLoading.value = true
@@ -180,7 +170,6 @@ const quotePrice = (quote: any, rfqItemId: any) => {
 const isLowest = (quote: any, rfqItemId: any) => quoteLine(quote, rfqItemId)?.lowest === true
 
 const openCreate = async () => {
-  await loadOptions()
   Object.assign(createForm, { requisitionId: null, deadline: '', remark: '', items: [] })
   createDialog.value = true
 }
@@ -347,7 +336,6 @@ const changeTab = async (name: any) => {
 }
 
 onMounted(async () => {
-  await loadOptions()
   await table.load()
   await priceTable.load()
   await load()
@@ -398,15 +386,15 @@ onMounted(async () => {
               placeholder="询价单号 / 申请单号 / 用途"
               clearable
               style="width: 240px"
-              @keyup.enter="load"
+              @keyup.enter="reload"
             />
-            <el-select v-model="status" placeholder="全部状态" clearable style="width: 130px" @change="load">
+            <el-select v-model="status" placeholder="全部状态" clearable style="width: 130px" @change="reload">
               <el-option label="待报价" value="OPEN" />
               <el-option label="已报价" value="QUOTED" />
               <el-option label="已选定" value="SELECTED" />
               <el-option label="已取消" value="CANCELLED" />
             </el-select>
-            <el-button type="primary" plain @click="load">查询</el-button>
+            <el-button type="primary" plain @click="reload">查询</el-button>
             <el-button plain @click="reset">重置</el-button>
             <div class="spacer"></div>
             <TableToolbar :table="table" export-api="/purchase-rfqs" export-name="询价比价" @applied="reload" />
@@ -668,20 +656,15 @@ onMounted(async () => {
       <el-form label-position="top">
         <div class="form-grid">
           <el-form-item label="采购申请" required>
-            <el-select
+            <ReferenceSelect
               v-model="createForm.requisitionId"
-              filterable
-              placeholder="选择已批准或部分转单的申请"
-              style="width: 100%"
-              @change="requisitionChanged"
-            >
-              <el-option
-                v-for="item in requisitions"
-                :key="item.id"
-                :label="`${item.reqNo} · ${item.purpose || '采购申请'}`"
-                :value="item.id"
-              />
-            </el-select>
+              url="/purchase-requisitions/options"
+              :params="{ status: 'APPROVED,PARTIAL' }"
+              code-field="reqNo"
+              label-field="purpose"
+              placeholder="输入申请单号或用途搜索（已批准/部分转单）"
+              @select="requisitionChanged"
+            />
           </el-form-item>
           <el-form-item label="报价截止">
             <el-date-picker v-model="createForm.deadline" type="date" value-format="YYYY-MM-DD" style="width: 100%" />

@@ -39,7 +39,12 @@ public class DeviceMaintenanceController {
     public ApiResponse checks(@RequestParam(required = false)
                               @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
                               @RequestParam(required = false) Long deviceId,
-                              @RequestParam(required = false) String status) {
+                              @RequestParam(required = false) String status,
+                              @RequestParam(required = false) Integer page,
+                              @RequestParam(defaultValue = "20") int size) {
+        if (page != null) {
+            return ApiResponse.ok(service.checkPage(date, deviceId, status, page, size));
+        }
         return ApiResponse.ok(service.checkTasks(date, deviceId, status));
     }
 
@@ -117,7 +122,12 @@ public class DeviceMaintenanceController {
 
     @GetMapping("/faults")
     public ApiResponse faults(@RequestParam(required = false) String status,
-                              @RequestParam(required = false) Long deviceId) {
+                              @RequestParam(required = false) Long deviceId,
+                              @RequestParam(required = false) Integer page,
+                              @RequestParam(defaultValue = "20") int size) {
+        if (page != null) {
+            return ApiResponse.ok(service.faultPage(status, deviceId, page, size));
+        }
         return ApiResponse.ok(service.faults(status, deviceId));
     }
 

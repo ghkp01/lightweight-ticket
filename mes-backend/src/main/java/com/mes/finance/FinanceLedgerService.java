@@ -38,6 +38,30 @@ public class FinanceLedgerService {
                 """);
     }
 
+    /** 引用选择专用：手工凭证的科目下拉只按关键字取前 N 条，避免把整张科目表塞进页面 */
+    public List<Map<String, Object>> accounts(String keyword, int limit) {
+        int size = Math.max(1, Math.min(limit, 50));
+        String like = "%" + (keyword == null ? "" : keyword.trim()) + "%";
+        return jdbcTemplate.queryForList("""
+                select code, name, type, role, enabled
+                from fin_account
+                where code ilike ? or name ilike ?
+                order by code limit ?
+                """, like, like, size);
+    }
+
+    /** 科目页签分页：科目表随核算细化增长，列表页改为后端分页 */
+    public PageResult accountPage(int page, int size) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 200);
+        Long total = jdbcTemplate.queryForObject("select count(*) from fin_account", Long.class);
+        List<Map<String, Object>> records = jdbcTemplate.queryForList("""
+                select code, name, type, role, enabled
+                from fin_account order by code limit ? offset ?
+                """, safeSize, (safePage - 1) * safeSize);
+        return new PageResult(records, total == null ? 0 : total, safePage, safeSize);
+    }
+
     public List<Map<String, Object>> periods() {
         return jdbcTemplate.queryForList("""
                 select x.period,

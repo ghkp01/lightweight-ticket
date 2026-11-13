@@ -40,8 +40,9 @@ public class QuotationController {
 
     @GetMapping("/reviewers")
     @PreAuthorize("hasAuthority('quotation:submit') or hasAuthority('quotation:review')")
-    public ApiResponse reviewers() {
-        return ApiResponse.ok(service.reviewers());
+    public ApiResponse reviewers(@RequestParam(required = false) String keyword,
+                                 @RequestParam(required = false) Integer limit) {
+        return ApiResponse.ok(service.reviewers(keyword, limit));
     }
 
     public record ReviewerRequest(long reviewerId) {

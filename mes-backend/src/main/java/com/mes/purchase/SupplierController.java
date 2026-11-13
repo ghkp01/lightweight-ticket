@@ -28,7 +28,12 @@ public class SupplierController {
     @GetMapping
     public ApiResponse list(@RequestParam(required = false) String keyword,
                             @RequestParam(required = false) String category,
-                            @RequestParam(required = false) String enabled) {
+                            @RequestParam(required = false) String enabled,
+                            @RequestParam(required = false) Integer page,
+                            @RequestParam(defaultValue = "20") int size) {
+        if (page != null) {
+            return ApiResponse.ok(service.page(keyword, category, enabled, page, size));
+        }
         return ApiResponse.ok(service.list(keyword, category, enabled));
     }
 

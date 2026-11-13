@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, fmtQty } from '../../api'
 import ReferenceSelect from '../../components/ReferenceSelect.vue'
@@ -10,6 +10,9 @@ const warehouseId = ref<number | ''>('')
 // ---------------- 库位
 const locations = ref<any[]>([])
 const locationLoading = ref(false)
+const locPage = ref(1)
+const locSize = ref(20)
+const locTotal = ref(0)
 const locationDrawer = ref(false)
 const editingLocationId = ref<number | null>(null)
 const locationForm = reactive<any>({
@@ -20,27 +23,32 @@ const locationForm = reactive<any>({
 const batches = ref<any[]>([])
 const batchLoading = ref(false)
 const batchKeyword = ref('')
+const batchPage = ref(1)
+const batchSize = ref(20)
+const batchTotal = ref(0)
 
 // ---------------- 移库
 const moveDialog = ref(false)
 const moveRow = ref<any>(null)
 const moveForm = reactive<any>({ qty: 0, toLocationId: null, remark: '' })
-const moveTargets = ref<any[]>([])
 const moves = ref<any[]>([])
 const moveLoading = ref(false)
+const movePage = ref(1)
+const moveSize = ref(20)
+const moveTotal = ref(0)
 // 已上架 / 未指定库位的概览：库位只细化到批次，没上架的量仍在仓库库存里
 const stats = ref<any>({})
-
-const locationOptions = computed(() =>
-  moveTargets.value.map((item) => ({ value: item.id, label: `${item.code} · ${item.name}` }))
-)
 
 const loadLocations = async () => {
   locationLoading.value = true
   try {
-    locations.value = (await api.get('/locations', {
-      warehouseId: warehouseId.value || undefined
-    })) || []
+    const data = await api.get('/locations', {
+      warehouseId: warehouseId.value || undefined,
+      page: locPage.value,
+      size: locSize.value
+    })
+    locations.value = data?.records || []
+    locTotal.value = data?.total || 0
   } finally {
     locationLoading.value = false
   }
@@ -49,21 +57,34 @@ const loadLocations = async () => {
 const loadBatches = async () => {
   batchLoading.value = true
   try {
-    batches.value = (await api.get('/locations/batches', {
+    const data = await api.get('/locations/batches', {
       warehouseId: warehouseId.value || undefined,
-      keyword: batchKeyword.value || undefined
-    })) || []
+      keyword: batchKeyword.value || undefined,
+      page: batchPage.value,
+      size: batchSize.value
+    })
+    batches.value = data?.records || []
+    batchTotal.value = data?.total || 0
   } finally {
     batchLoading.value = false
   }
 }
 
+const reloadBatches = () => {
+  batchPage.value = 1
+  loadBatches()
+}
+
 const loadMoves = async () => {
   moveLoading.value = true
   try {
-    moves.value = (await api.get('/locations/moves', {
-      warehouseId: warehouseId.value || undefined
-    })) || []
+    const data = await api.get('/locations/moves', {
+      warehouseId: warehouseId.value || undefined,
+      page: movePage.value,
+      size: moveSize.value
+    })
+    moves.value = data?.records || []
+    moveTotal.value = data?.total || 0
   } finally {
     moveLoading.value = false
   }
@@ -76,6 +97,9 @@ const loadStats = async () => {
 }
 
 const reload = async () => {
+  locPage.value = 1
+  batchPage.value = 1
+  movePage.value = 1
   await Promise.all([loadLocations(), loadBatches(), loadMoves(), loadStats()])
 }
 
@@ -104,7 +128,9 @@ const saveLocation = async () => {
     ElMessage.warning('请选择仓库并填写库位编码')
     return
   }
-  await api.post('/locations', { id: editingLocationId.value, ...locationForm })
+  const payload: any = { ...locationForm }
+  delete payload.warehouseLabel
+  await api.post('/locations', { id: editingLocationId.value, ...payload })
   ElMessage.success('库位已保存')
   locationDrawer.value = false
   await loadLocations()
@@ -122,7 +148,6 @@ const openMove = async (row: any) => {
   moveForm.qty = Number(row.qty || 0)
   moveForm.toLocationId = null
   moveForm.remark = ''
-  moveTargets.value = (await api.get('/locations/options', { warehouseId: row.warehouseId })) || []
   moveDialog.value = true
 }
 
@@ -232,6 +257,17 @@ onMounted(async () => {
               </el-table-column>
             </el-table>
           </div>
+          <div class="pager">
+            <el-pagination
+              v-model:current-page="locPage"
+              v-model:page-size="locSize"
+              :total="locTotal"
+              :page-sizes="[10, 20, 50, 100]"
+              layout="total, sizes, prev, pager, next"
+              @current-change="loadLocations"
+              @size-change="loadLocations"
+            />
+          </div>
         </el-tab-pane>
 
         <el-tab-pane label="批次分布" name="batches">
@@ -241,9 +277,9 @@ onMounted(async () => {
               placeholder="物料编码 / 名称 / 批次号"
               clearable
               style="width: 240px"
-              @keyup.enter="loadBatches"
+              @keyup.enter="reloadBatches"
             />
-            <el-button type="primary" :loading="batchLoading" @click="loadBatches">查询</el-button>
+            <el-button type="primary" :loading="batchLoading" @click="reloadBatches">查询</el-button>
             <div class="spacer"></div>
             <span class="toolbar-tip">未上架批次显示「未指定」</span>
           </div>
@@ -280,6 +316,17 @@ onMounted(async () => {
               </el-table-column>
             </el-table>
           </div>
+          <div class="pager">
+            <el-pagination
+              v-model:current-page="batchPage"
+              v-model:page-size="batchSize"
+              :total="batchTotal"
+              :page-sizes="[10, 20, 50, 100]"
+              layout="total, sizes, prev, pager, next"
+              @current-change="loadBatches"
+              @size-change="loadBatches"
+            />
+          </div>
         </el-tab-pane>
 
         <el-tab-pane label="移库记录" name="moves">
@@ -315,6 +362,17 @@ onMounted(async () => {
                 <template #default="{ row }">{{ row.remark || '-' }}</template>
               </el-table-column>
             </el-table>
+          </div>
+          <div class="pager">
+            <el-pagination
+              v-model:current-page="movePage"
+              v-model:page-size="moveSize"
+              :total="moveTotal"
+              :page-sizes="[10, 20, 50, 100]"
+              layout="total, sizes, prev, pager, next"
+              @current-change="loadMoves"
+              @size-change="loadMoves"
+            />
           </div>
         </el-tab-pane>
       </el-tabs>
@@ -361,9 +419,13 @@ onMounted(async () => {
           <el-input-number v-model="moveForm.qty" :min="0.01" :precision="2" style="width: 100%" />
         </el-form-item>
         <el-form-item label="目标库位" required>
-          <el-select v-model="moveForm.toLocationId" filterable placeholder="选择库位" style="width: 100%">
-            <el-option v-for="item in locationOptions" :key="item.value" :label="item.label" :value="item.value" />
-          </el-select>
+          <ReferenceSelect
+            :key="moveRow?.warehouseId"
+            v-model="moveForm.toLocationId"
+            url="/locations/options"
+            :params="{ warehouseId: moveRow?.warehouseId }"
+            placeholder="输入库位编码或名称搜索"
+          />
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="moveForm.remark" placeholder="选填，例如整理货位" />

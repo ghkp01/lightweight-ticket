@@ -12,6 +12,9 @@ public interface UserSkillPort {
     /** 该工序的持证人员；工序为 null 时返回空列表 */
     List<SkillUser> candidates(Long processId);
 
+    /** 该工序的持证人员，支持姓名/账号关键字与条数上限，供派工远程搜索 */
+    List<SkillUser> candidates(Long processId, String keyword, Integer limit);
+
     /** 该工序是否启用了持证校验（有任何人配了这道工序的技能） */
     boolean processRequiresSkill(Long processId);
 

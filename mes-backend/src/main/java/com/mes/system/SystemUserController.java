@@ -42,8 +42,9 @@ public class SystemUserController {
     /** 派工选人用：只要登录即可取启用用户，带组织与岗位，便于按班组挑人 */
     @GetMapping("/users/options")
     public ApiResponse userOptions(@RequestParam(required = false) String keyword,
-                                   @RequestParam(required = false) Long orgId) {
-        return ApiResponse.ok(service.options(keyword, orgId));
+                                   @RequestParam(required = false) Long orgId,
+                                   @RequestParam(required = false) Integer limit) {
+        return ApiResponse.ok(service.options(keyword, orgId, limit));
     }
 
     @PutMapping("/users/{id}")

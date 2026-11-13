@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
+import ReferenceSelect from '../components/ReferenceSelect.vue'
 import { useAuthStore } from '../stores/auth'
 import { noticeTarget, openNoticeTarget } from '../utils/noticeLink'
 
@@ -23,8 +24,10 @@ const type = ref('ALL')
 const keyword = ref('')
 const loading = ref(false)
 const rows = ref<any[]>([])
+const page = ref(1)
+const size = ref(20)
+const total = ref(0)
 const summary = ref({ open: 0, overdue: 0, unclaimed: 0 })
-const users = ref<any[]>([])
 
 const TYPES = [
   { value: 'ALL', label: '全部类型' },
@@ -69,24 +72,39 @@ const load = async () => {
   loading.value = true
   try {
     const typeParam = type.value === 'ALL' ? undefined : type.value
+    let data: any
     if (tab.value === 'mine') {
-      rows.value = (await api.get('/tasks/my', { status: status.value, type: typeParam })) || []
+      data = await api.get('/tasks/my', {
+        status: status.value,
+        type: typeParam,
+        page: page.value,
+        size: size.value
+      })
     } else {
-      rows.value =
-        (await api.get('/tasks', {
-          status: status.value,
-          type: typeParam,
-          keyword: keyword.value || undefined
-        })) || []
+      data = await api.get('/tasks', {
+        status: status.value,
+        type: typeParam,
+        keyword: keyword.value || undefined,
+        page: page.value,
+        size: size.value
+      })
     }
+    rows.value = data?.records || []
+    total.value = data?.total || 0
     summary.value = (await api.get('/tasks/summary')) || { open: 0, overdue: 0, unclaimed: 0 }
   } finally {
     loading.value = false
   }
 }
 
+const reload = () => {
+  page.value = 1
+  load()
+}
+
 const switchTab = async (value: string | number) => {
   tab.value = value === 'all' ? 'all' : 'mine'
+  page.value = 1
   await load()
 }
 
@@ -115,17 +133,20 @@ const finish = async (row: any) => {
 }
 
 const assignDialog = ref(false)
-const assignForm = ref<{ id: number; title: string; username: string }>({ id: 0, title: '', username: '' })
+const assignForm = ref<{ id: number; title: string; username: string; label: string }>({
+  id: 0,
+  title: '',
+  username: '',
+  label: ''
+})
 
 const openAssign = async (row: any) => {
-  if (!users.value.length) {
-    try {
-      users.value = (await api.get('/system/users/options')) || []
-    } catch {
-      users.value = []
-    }
+  assignForm.value = {
+    id: row.id,
+    title: row.title,
+    username: row.assigneeUsername || '',
+    label: row.assigneeName || row.assigneeUsername || ''
   }
-  assignForm.value = { id: row.id, title: row.title, username: row.assigneeUsername || '' }
   assignDialog.value = true
 }
 
@@ -166,10 +187,10 @@ onMounted(load)
           <el-radio-button label="mine">我的任务</el-radio-button>
           <el-radio-button v-if="isManager" label="all">全部任务</el-radio-button>
         </el-radio-group>
-        <el-select v-model="type" size="small" style="width: 150px" @change="load">
+        <el-select v-model="type" size="small" style="width: 150px" @change="reload">
           <el-option v-for="item in TYPES" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
-        <el-select v-model="status" size="small" style="width: 120px" @change="load">
+        <el-select v-model="status" size="small" style="width: 120px" @change="reload">
           <el-option v-for="item in STATUS" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
         <el-input
@@ -179,7 +200,7 @@ onMounted(load)
           placeholder="任务标题 / 单据号"
           clearable
           style="width: 200px"
-          @keyup.enter="load"
+          @keyup.enter="reload"
         />
         <el-button size="small" @click="load">刷新</el-button>
         <div class="spacer"></div>
@@ -243,18 +264,32 @@ onMounted(load)
           </template>
         </el-table-column>
       </el-table>
+
+      <div class="pager">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="size"
+          :total="total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next"
+          @current-change="load"
+          @size-change="load"
+        />
+      </div>
     </div>
 
     <el-dialog v-model="assignDialog" title="指派任务" width="420px">
       <div class="assign-tip">{{ assignForm.title }}</div>
-      <el-select v-model="assignForm.username" placeholder="选一个人，留空则退回角色池" clearable filterable style="width: 100%">
-        <el-option
-          v-for="user in users"
-          :key="user.id"
-          :label="user.realName ? `${user.realName}（${user.username}）` : user.username"
-          :value="user.username"
-        />
-      </el-select>
+      <ReferenceSelect
+        v-model="assignForm.username"
+        url="/system/users/options"
+        :initial-label="assignForm.label"
+        value-field="username"
+        code-field="username"
+        label-field="realName"
+        placeholder="输入姓名或账号搜索，留空则退回角色池"
+        @select="(user) => (assignForm.label = user ? (user.realName || user.username) : '')"
+      />
       <div class="assign-hint">指派后对方会收到一条站内信，逾期时每天 09:00 还会提醒一次。</div>
       <template #footer>
         <el-button @click="assignDialog = false">取消</el-button>

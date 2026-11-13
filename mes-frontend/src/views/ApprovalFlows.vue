@@ -7,6 +7,9 @@ import { api } from '../api'
 const router = useRouter()
 const loading = ref(false)
 const flows = ref<any[]>([])
+const flowTotal = ref(0)
+const flowPage = ref(1)
+const flowSize = ref(20)
 
 const bizLabel: Record<string, string> = {
   TRANSFER: '跨厂调拨',
@@ -146,9 +149,33 @@ const runSimulate = async () => {
 const load = async () => {
   loading.value = true
   try {
-    flows.value = (await api.get('/approvals/flows')) || []
+    const data = await api.get('/approvals/flows', {
+      page: flowPage.value,
+      size: flowSize.value
+    })
+    flows.value = data?.records || []
+    flowTotal.value = data?.total || 0
   } finally {
     loading.value = false
+  }
+}
+
+const changeFlowPage = (value: number) => {
+  flowPage.value = value
+  load()
+}
+
+const changeFlowSize = () => {
+  flowPage.value = 1
+  load()
+}
+
+/** 停用 / 删除 / 改回调后刷新：当前页空了就回上一页 */
+const refreshFlows = async () => {
+  await load()
+  if (!flows.value.length && flowPage.value > 1) {
+    flowPage.value -= 1
+    await load()
   }
 }
 
@@ -157,7 +184,7 @@ const design = (row: any) => router.push(`/approvals/design/${row ? row.id : 'ne
 const toggle = async (row: any) => {
   await api.post(`/approvals/flows/${row.id}/toggle`, { enabled: !row.enabled })
   ElMessage.success(row.enabled ? '已停用' : '已启用')
-  await load()
+  await refreshFlows()
 }
 
 const remove = async (row: any) => {
@@ -168,7 +195,7 @@ const remove = async (row: any) => {
     )
     await api.delete(`/approvals/flows/${row.id}`)
     ElMessage.success('已删除')
-    await load()
+    await refreshFlows()
   } catch (error) {
     // 取消
   }
@@ -191,7 +218,7 @@ const editWebhook = async (row: any) => {
       webhookUrl: String(value || '').trim()
     })
     ElMessage.success('已保存回调地址')
-    await load()
+    await refreshFlows()
   } catch (error) {
     // 取消
   }
@@ -215,20 +242,64 @@ const canaryUsers = ref<string[]>([])
 const canaryNote = ref('')
 const canaryStatus = ref<any>({})
 const factoryOptions = ref<any[]>([])
-const userOptions = ref<any[]>([])
+const userSearchResults = ref<any[]>([])
+const userLabels = ref<Record<string, any>>({})
+
+/** 远程搜索结果直接替换列表，已选名单的姓名单独缓存，避免结果越搜越多 */
+const rememberUserLabels = (rows: any[]) => {
+  const next = { ...userLabels.value }
+  ;(rows || []).forEach((item) => {
+    if (item?.username) next[item.username] = item
+  })
+  userLabels.value = next
+}
+
+const searchUsers = async (keyword = '') => {
+  try {
+    const rows = await api.get('/system/users/options', { keyword: keyword || undefined, limit: 20 })
+    userSearchResults.value = rows || []
+    rememberUserLabels(rows || [])
+  } catch {
+    // 搜索失败保留当前结果
+  }
+}
+
+/** 回显灰度/抄送名单时补全姓名，避免只显示账号 */
+const resolveUsers = async (names: string[]) => {
+  const missing = [...new Set(names)].filter(
+    (name) => name && !userLabels.value[name]
+  )
+  await Promise.all(missing.map(async (name) => {
+    try {
+      const rows = await api.get('/system/users/options', { keyword: name, limit: 5 })
+      rememberUserLabels(rows || [])
+    } catch {
+      // 回显失败时下拉退回显示账号
+    }
+  }))
+}
+
+/** 下拉候选：当前搜索结果 + 已选用户的姓名缓存 */
+const optionsFor = (selected: string[]) => {
+  const list = [...userSearchResults.value]
+  selected.forEach((name) => {
+    const row = userLabels.value[name]
+    if (row && !list.some((item: any) => String(item.username) === name)) list.push(row)
+  })
+  return list
+}
 
 const loadCanaryOptions = async () => {
-  if (factoryOptions.value.length && userOptions.value.length) return
-  try {
-    // 用户下拉在系统管理下的 /system/users/options；之前少了 system 段，请求落到不存在的路径上
-    const [orgs, users] = await Promise.all([
-      api.get('/orgs/options'),
-      api.get('/system/users/options')
-    ])
-    factoryOptions.value = (orgs || []).filter((item: any) => item.type === 'PLANT')
-    userOptions.value = users || []
-  } catch {
-    // 下拉数据拿不到不影响读当前灰度状态，弹窗照常打开（具体错误拦截器已经提示过）
+  if (!factoryOptions.value.length) {
+    try {
+      const orgs = await api.get('/orgs/options', { type: 'PLANT', limit: 50 })
+      factoryOptions.value = orgs || []
+    } catch {
+      // 下拉数据拿不到不影响读当前灰度状态，弹窗照常打开（具体错误拦截器已经提示过）
+    }
+  }
+  if (!userSearchResults.value.length) {
+    await searchUsers('')
   }
 }
 
@@ -245,6 +316,7 @@ const openCanary = async (row: any) => {
     canaryFactories.value = (status.canaryFactoryIds || []).map((id: any) => Number(id))
     canaryUsers.value = status.canaryUsers || []
     canaryNote.value = status.canaryNote || ''
+    await resolveUsers(canaryUsers.value)
   } finally {
     canaryLoading.value = false
   }
@@ -322,6 +394,7 @@ const openPolicies = async (row: any) => {
       allowAddSign: item.allowAddSign !== false,
       ccList: item.ccUsers ? String(item.ccUsers).split(',').filter(Boolean) : []
     }))
+    await resolveUsers(policyRows.value.flatMap((item: any) => item.ccList))
   } finally {
     policyLoading.value = false
   }
@@ -425,6 +498,7 @@ const saveRules = async () => {
         <span class="muted">一个业务类型可以挂多条链，按适用条件分流；画布改完保存会部署到 Flowable</span>
       </div>
       <div class="head-actions">
+        <span class="muted">共 {{ flowTotal }} 条审批链</span>
         <el-button @click="openSimulate()">试算命中</el-button>
         <el-button type="primary" @click="design(null)">新建流程</el-button>
       </div>
@@ -529,6 +603,17 @@ const saveRules = async () => {
           </template>
         </el-table-column>
       </el-table>
+      <div class="pager">
+        <el-pagination
+          v-model:current-page="flowPage"
+          v-model:page-size="flowSize"
+          :total="flowTotal"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next"
+          @current-change="changeFlowPage"
+          @size-change="changeFlowSize"
+        />
+      </div>
     </div>
 
     <el-dialog append-to-body v-model="canaryDialog" title="灰度发布" width="560px">
@@ -574,11 +659,14 @@ const saveRules = async () => {
               multiple
               clearable
               filterable
-              placeholder="选中用户：这些人发起的单据全部走灰度版"
+              remote
+              reserve-keyword
+              :remote-method="searchUsers"
+              placeholder="输入姓名或账号搜索：这些人发起的单据全部走灰度版"
               style="width: 100%"
             >
               <el-option
-                v-for="item in userOptions"
+                v-for="item in optionsFor(canaryUsers)"
                 :key="item.username"
                 :label="`${item.realName || item.username}（${item.username}）`"
                 :value="item.username"
@@ -670,9 +758,11 @@ const saveRules = async () => {
           </el-table-column>
           <el-table-column label="抄送人" min-width="200">
             <template #default="{ row }">
-              <el-select v-model="row.ccList" multiple filterable clearable collapse-tags size="small" placeholder="不抄送" style="width: 100%">
+              <el-select v-model="row.ccList" multiple filterable clearable collapse-tags remote reserve-keyword
+                         :remote-method="searchUsers"
+                         size="small" placeholder="输入姓名或账号搜索，不抄送留空" style="width: 100%">
                 <el-option
-                  v-for="item in userOptions"
+                  v-for="item in optionsFor(row.ccList)"
                   :key="item.username"
                   :label="`${item.realName || item.username}（${item.username}）`"
                   :value="item.username"

@@ -15,6 +15,9 @@ const factoryOptions = ref<any[]>([])
 const roleOptions = ref<any[]>([])
 const entityType = ref('sales_order')
 const rows = ref<any[]>([])
+const fieldTotal = ref(0)
+const fieldPage = ref(1)
+const fieldSize = ref(20)
 
 const typeOptions = [
   { value: 'TEXT', label: '单行文本' },
@@ -59,11 +62,39 @@ const loadFields = async () => {
   if (!entityType.value) return
   loading.value = true
   try {
-    rows.value = await api.get('/custom-fields/definitions', {
-      entityType: entityType.value
+    const data = await api.get('/custom-fields/definitions', {
+      entityType: entityType.value,
+      page: fieldPage.value,
+      size: fieldSize.value
     })
+    rows.value = Array.isArray(data) ? data : (data?.records || [])
+    fieldTotal.value = Array.isArray(data) ? rows.value.length : (data?.total || 0)
   } finally {
     loading.value = false
+  }
+}
+
+const reloadFields = () => {
+  fieldPage.value = 1
+  loadFields()
+}
+
+const changeFieldPage = (value: number) => {
+  fieldPage.value = value
+  loadFields()
+}
+
+const changeFieldSize = () => {
+  fieldPage.value = 1
+  loadFields()
+}
+
+/** 新增 / 编辑 / 停用后刷新：当前页空了就回上一页 */
+const refreshFields = async () => {
+  await loadFields()
+  if (!rows.value.length && fieldPage.value > 1) {
+    fieldPage.value -= 1
+    await loadFields()
   }
 }
 
@@ -169,7 +200,7 @@ const submit = async () => {
     }
     ElMessage.success('字段已保存')
     dialog.value = false
-    await loadFields()
+    await refreshFields()
   } finally {
     saving.value = false
   }
@@ -191,7 +222,7 @@ const toggleEnabled = async (row: any) => {
     editableRoles: [...(row.editableRoles || [])]
   })
   ElMessage.success(next ? '字段已启用' : '字段已停用')
-  await loadFields()
+  await refreshFields()
 }
 
 const disableField = async (row: any) => {
@@ -202,7 +233,7 @@ const disableField = async (row: any) => {
   )
   await api.delete(`/custom-fields/${row.id}`)
   ElMessage.success('已停用')
-  await loadFields()
+  await refreshFields()
 }
 
 const displayValue = (value: any) => {
@@ -232,7 +263,7 @@ onMounted(async () => {
 
     <div class="panel">
       <div class="filter-bar">
-        <el-select v-model="entityType" style="width: 220px" @change="loadFields">
+        <el-select v-model="entityType" style="width: 220px" @change="reloadFields">
           <el-option
             v-for="item in entities"
             :key="item.entityType"
@@ -300,6 +331,17 @@ onMounted(async () => {
             </template>
           </el-table-column>
         </el-table>
+      </div>
+      <div class="pager">
+        <el-pagination
+          v-model:current-page="fieldPage"
+          v-model:page-size="fieldSize"
+          :total="fieldTotal"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next"
+          @current-change="changeFieldPage"
+          @size-change="changeFieldSize"
+        />
       </div>
     </div>
 

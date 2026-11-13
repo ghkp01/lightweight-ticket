@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -24,7 +25,11 @@ public class SystemRoleController {
 
     @GetMapping("/roles")
     @PreAuthorize("hasRole('ADMIN')")
-    public ApiResponse roles() {
+    public ApiResponse roles(@RequestParam(required = false) Integer page,
+                             @RequestParam(required = false) Integer size) {
+        if (page != null) {
+            return ApiResponse.ok(service.page(page, size == null ? 20 : size));
+        }
         return ApiResponse.ok(service.list());
     }
 

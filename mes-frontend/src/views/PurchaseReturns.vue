@@ -83,7 +83,7 @@ const load = async () => {
 }
 
 const loadInbounds = async (search = '') => {
-  inbounds.value = await api.get('/purchase-returns/returnable-inbounds', { keyword: search })
+  inbounds.value = await api.get('/purchase-returns/returnable-inbounds', { keyword: search, limit: 20 })
 }
 
 const today = () => {
@@ -235,14 +235,14 @@ onMounted(async () => {
           placeholder="退货单号 / 采购单 / 入库单 / 供应商"
           clearable
           style="width: 280px"
-          @keyup.enter="load"
+          @keyup.enter="reload"
         />
-        <el-select v-model="status" placeholder="全部状态" clearable style="width: 140px" @change="load">
+        <el-select v-model="status" placeholder="全部状态" clearable style="width: 140px" @change="reload">
           <el-option label="草稿" value="DRAFT" />
           <el-option label="已完成" value="COMPLETED" />
           <el-option label="已取消" value="CANCELLED" />
         </el-select>
-        <el-button type="primary" plain @click="load">查询</el-button>
+        <el-button type="primary" plain @click="reload">查询</el-button>
         <div class="spacer"></div>
         <TableToolbar :table="table" export-api="/purchase-returns" export-name="采购退货" @applied="reload" />
         <span class="toolbar-tip">共 {{ total }} 张退货单</span>

@@ -27,13 +27,20 @@ public class LocationController {
 
     @GetMapping
     public ApiResponse list(@RequestParam(required = false) Long warehouseId,
-                            @RequestParam(required = false) String keyword) {
+                            @RequestParam(required = false) String keyword,
+                            @RequestParam(required = false) Integer page,
+                            @RequestParam(required = false) Integer size) {
+        if (page != null) {
+            return ApiResponse.ok(service.page(warehouseId, keyword, page, size == null ? 20 : size));
+        }
         return ApiResponse.ok(service.list(warehouseId, keyword));
     }
 
     @GetMapping("/options")
-    public ApiResponse options(@RequestParam(required = false) Long warehouseId) {
-        return ApiResponse.ok(service.options(warehouseId));
+    public ApiResponse options(@RequestParam(required = false) Long warehouseId,
+                               @RequestParam(required = false) String keyword,
+                               @RequestParam(required = false) Integer limit) {
+        return ApiResponse.ok(service.options(warehouseId, keyword, limit));
     }
 
     /** 已上架 / 未指定库位的批次与数量，给库位页做概览，避免误以为仓库空了 */
@@ -55,7 +62,13 @@ public class LocationController {
 
     @GetMapping("/batches")
     public ApiResponse batches(@RequestParam(required = false) Long warehouseId,
-                               @RequestParam(required = false) String keyword) {
+                               @RequestParam(required = false) String keyword,
+                               @RequestParam(required = false) Integer page,
+                               @RequestParam(required = false) Integer size) {
+        if (page != null) {
+            return ApiResponse.ok(service.batchLocationsPage(warehouseId, keyword, page,
+                    size == null ? 20 : size));
+        }
         return ApiResponse.ok(service.batchLocations(warehouseId, keyword));
     }
 
@@ -66,7 +79,12 @@ public class LocationController {
 
     @GetMapping("/moves")
     public ApiResponse moves(@RequestParam(required = false) Long warehouseId,
-                             @RequestParam(defaultValue = "100") int limit) {
+                             @RequestParam(defaultValue = "100") int limit,
+                             @RequestParam(required = false) Integer page,
+                             @RequestParam(required = false) Integer size) {
+        if (page != null) {
+            return ApiResponse.ok(service.movesPage(warehouseId, page, size == null ? 20 : size));
+        }
         return ApiResponse.ok(service.moves(warehouseId, limit));
     }
 }

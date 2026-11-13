@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, fmtMoney } from '../../api'
+import ReferenceSelect from '../../components/ReferenceSelect.vue'
 
 const tab = ref('vouchers')
 const loading = ref(false)
@@ -18,6 +19,9 @@ const detailDrawer = ref(false)
 const detail = ref<any>(null)
 
 const accounts = ref<any[]>([])
+const accountPage = ref(1)
+const accountSize = ref(20)
+const accountTotal = ref(0)
 const periods = ref<any[]>([])
 const rates = ref<any[]>([])
 
@@ -68,7 +72,16 @@ const loadVouchers = async () => {
   }
 }
 const loadAccounts = async () => {
-  accounts.value = (await api.get('/finance/accounts')) || []
+  const data = await api.get('/finance/accounts', {
+    page: accountPage.value,
+    size: accountSize.value
+  })
+  accounts.value = data?.records || []
+  accountTotal.value = data?.total || 0
+}
+const changeAccountPage = (value: number) => {
+  accountPage.value = value
+  loadAccounts()
 }
 const loadPeriods = async () => {
   periods.value = (await api.get('/finance/periods')) || []
@@ -346,6 +359,17 @@ onMounted(async () => {
             </template>
           </el-table-column>
         </el-table>
+        <div class="pager">
+          <el-pagination
+            v-model:current-page="accountPage"
+            v-model:page-size="accountSize"
+            :total="accountTotal"
+            :page-sizes="[10, 20, 50, 100]"
+            layout="total, sizes, prev, pager, next"
+            @current-change="changeAccountPage"
+            @size-change="loadAccounts"
+          />
+        </div>
       </el-tab-pane>
     </el-tabs>
 
@@ -363,10 +387,14 @@ onMounted(async () => {
         <el-table :data="manualForm.lines" size="small">
           <el-table-column label="科目" min-width="240">
             <template #default="{ row }">
-              <el-select v-model="row.accountCode" filterable style="width: 100%">
-                <el-option v-for="item in accounts" :key="item.code"
-                           :label="`${item.code} · ${item.name}`" :value="item.code" />
-              </el-select>
+              <ReferenceSelect
+                v-model="row.accountCode"
+                url="/finance/accounts/options"
+                value-field="code"
+                code-field="code"
+                label-field="name"
+                placeholder="输入科目编码或名称搜索"
+              />
             </template>
           </el-table-column>
           <el-table-column label="摘要" min-width="180">

@@ -1,6 +1,7 @@
 package com.mes.report;
 
 import com.mes.common.BizException;
+import com.mes.common.PageResult;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -152,6 +153,86 @@ public class ReportService {
                               then 0 else 1 end,
                          so.delivery_date asc nulls last, so.id
                 """);
+    }
+
+    /** 交期预警分页；不传 page 时仍走 delivery() 返回全量 */
+    public PageResult deliveryPage(int page, int size) {
+        int safePage = Math.max(1, page);
+        int safeSize = Math.max(1, Math.min(size, 200));
+        Long total = jdbcTemplate.queryForObject("""
+                select count(*) from rm_sales_order so
+                join rm_customer c on c.id = so.customer_id
+                where so.status not in ('COMPLETED', 'CANCELLED')
+                """, Long.class);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                select so.order_no as "orderNo",
+                       c.name as "customerName",
+                       to_char(so.delivery_date, 'YYYY-MM-DD') as "deliveryDate",
+                       so.status,
+                       so.total_qty as "totalQty",
+                       coalesce((select sum(i.shipped_qty) from rm_sales_order_item i
+                                 where i.order_id = so.id), 0) as "shippedQty",
+                       case when so.delivery_date is not null and so.delivery_date < current_date
+                            then true else false end as "late",
+                       case when so.delivery_date is not null and so.delivery_date < current_date
+                            then (current_date - so.delivery_date) else 0 end as "lateDays"
+                from rm_sales_order so
+                join rm_customer c on c.id = so.customer_id
+                where so.status not in ('COMPLETED', 'CANCELLED')
+                order by case when so.delivery_date is not null and so.delivery_date < current_date
+                              then 0 else 1 end,
+                         so.delivery_date asc nulls last, so.id
+                limit ? offset ?
+                """, safeSize, (long) (safePage - 1) * safeSize);
+        return new PageResult(rows, total == null ? 0 : total, safePage, safeSize);
+    }
+
+    /** 计件工资分页：汇总按整月统计，明细按页返回 */
+    public Map<String, Object> payrollPage(String month, int page, int size) {
+        YearMonth period = parseMonth(month);
+        Date start = Date.valueOf(period.atDay(1));
+        Date end = Date.valueOf(period.plusMonths(1).atDay(1));
+        int safePage = Math.max(1, page);
+        int safeSize = Math.max(1, Math.min(size, 200));
+
+        Long total = jdbcTemplate.queryForObject("""
+                select count(distinct coalesce(nullif(trim(r.worker), ''), '未指定'))
+                from work_report r
+                join rm_work_order_operation o on o.id = r.operation_id
+                where r.reported_at::date >= ? and r.reported_at::date < ?
+                """, Long.class, start, end);
+        Map<String, Object> totals = jdbcTemplate.queryForMap("""
+                select coalesce(sum(r.qualified_qty), 0) as "qualifiedQty",
+                       coalesce(round(sum(r.qualified_qty * coalesce(o.unit_price, 0)), 2), 0) as "wage"
+                from work_report r
+                join rm_work_order_operation o on o.id = r.operation_id
+                where r.reported_at::date >= ? and r.reported_at::date < ?
+                """, start, end);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                select coalesce(nullif(trim(r.worker), ''), '未指定') as "worker",
+                       count(distinct r.work_order_id) as "workOrders",
+                       coalesce(sum(r.qualified_qty), 0) as "qualifiedQty",
+                       coalesce(round(sum(r.qualified_qty * coalesce(o.unit_price, 0)), 2), 0) as "wage"
+                from work_report r
+                join rm_work_order_operation o on o.id = r.operation_id
+                where r.reported_at::date >= ? and r.reported_at::date < ?
+                group by coalesce(nullif(trim(r.worker), ''), '未指定')
+                order by 4 desc, 1
+                limit ? offset ?
+                """, start, end, safeSize, (long) (safePage - 1) * safeSize);
+
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("totalWage", decimal(totals.get("wage")).setScale(2, RoundingMode.HALF_UP));
+        summary.put("workers", total == null ? 0 : total);
+        summary.put("qualifiedQty", decimal(totals.get("qualifiedQty")));
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("summary", summary);
+        result.put("records", rows);
+        result.put("total", total == null ? 0 : total);
+        result.put("page", safePage);
+        result.put("size", safeSize);
+        return result;
     }
 
     private BigDecimal rate(BigDecimal defectQty, BigDecimal totalQty) {

@@ -29,13 +29,18 @@ public class WorkOrderUnitController {
                             @RequestParam(required = false) String keyword,
                             @RequestParam(required = false) String status,
                             @RequestParam(required = false) Integer operationSeq,
-                            @RequestParam(defaultValue = "1") int page,
-                            @RequestParam(defaultValue = "20") int size) {
+                            @RequestParam(required = false) Integer page,
+                            @RequestParam(required = false) Integer size) {
         if (workOrderId != null) {
+            if (page != null) {
+                return ApiResponse.ok(service.listByWorkOrder(workOrderId,
+                        Math.max(1, page), Math.min(100, size == null || size < 1 ? 20 : size)));
+            }
             return ApiResponse.ok(service.listByWorkOrder(workOrderId));
         }
         return ApiResponse.ok(service.search(keyword, status, operationSeq,
-                Math.max(1, page), Math.min(200, Math.max(1, size))));
+                Math.max(1, page == null ? 1 : page),
+                Math.min(200, size == null || size < 1 ? 20 : size)));
     }
 
     /** 可筛选的工序下拉（按工单里出现过的工序序号去重） */

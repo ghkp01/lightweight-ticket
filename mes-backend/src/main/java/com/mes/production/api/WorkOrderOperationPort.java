@@ -14,8 +14,8 @@ import java.util.Map;
  */
 public interface WorkOrderOperationPort {
 
-    /** 工序 id → 已生成的工单工序条数，没被用过的不在结果里 */
-    Map<Long, Integer> operationCountByProcess();
+    /** 指定工序 id → 已生成的工单工序条数，没被用过的不在结果里（分页列表只传当前页的工序） */
+    Map<Long, Integer> operationCounts(Collection<Long> processIds);
 
     /** 这些工序是否已经用在工单上（删除前校验） */
     boolean anyOperationForProcesses(Collection<Long> processIds);

@@ -69,6 +69,11 @@ const load = async () => {
   }
 }
 
+const reload = () => {
+  page.value = 1
+  load()
+}
+
 const resetFilter = () => {
   keyword.value = ''
   status.value = ''
@@ -156,17 +161,17 @@ onMounted(() => {
         </p>
       </div>
       <div class="page-actions">
-        <el-select v-model="status" clearable placeholder="全部状态" style="width: 130px" @change="load">
+        <el-select v-model="status" clearable placeholder="全部状态" style="width: 130px" @change="reload">
           <el-option v-for="item in statusOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
-        <el-checkbox v-model="overdueOnly" @change="load">只看超期</el-checkbox>
+        <el-checkbox v-model="overdueOnly" @change="reload">只看超期</el-checkbox>
         <el-input
           v-model="keyword"
           clearable
           placeholder="外协单号 / 工单号 / 工序"
           style="width: 210px"
-          @keyup.enter="load"
-          @clear="load"
+          @keyup.enter="reload"
+          @clear="reload"
         />
         <el-button @click="load">刷新</el-button>
         <el-button v-if="keyword || status || overdueOnly" @click="resetFilter">清空条件</el-button>

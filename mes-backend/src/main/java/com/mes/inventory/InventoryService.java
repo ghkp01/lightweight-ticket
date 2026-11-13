@@ -115,6 +115,63 @@ public class InventoryService implements InventoryPort {
         return rows;
     }
 
+    /** 库存列表分页：库存行数 = 产品 × 仓库，改为后端分页避免一次拉全表 */
+    public PageResult page(String keyword, Long warehouseId, boolean onlyWarning, int page, int size) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 200);
+        Long scopeWarehouseId = warehouseScope();
+        if (scopeWarehouseId != null) {
+            warehouseId = scopeWarehouseId;
+        }
+        boolean hasKeyword = keyword != null && !keyword.isBlank();
+        Set<Long> productIds = hasKeyword ? masterData.searchProductIds(keyword) : Set.of();
+        if (hasKeyword && productIds.isEmpty()) {
+            return new PageResult(List.of(), 0, safePage, safeSize);
+        }
+        List<Object> args = new ArrayList<>();
+        StringBuilder where = new StringBuilder(" where 1 = 1 ");
+        if (hasKeyword) {
+            where.append(" and i.product_id in (")
+                    .append(String.join(", ", java.util.Collections.nCopies(productIds.size(), "?")))
+                    .append(") ");
+            args.addAll(productIds);
+        }
+        if (warehouseId != null) {
+            where.append(" and i.warehouse_id = ? ");
+            args.add(warehouseId);
+        }
+        MasterDataViews.appendWarehouseScope(orgScope, masterData, where, args, "i.warehouse_id");
+        if (onlyWarning) {
+            where.append(" and p.safety_stock is not null and i.qty < p.safety_stock ");
+        }
+        Long total = jdbcTemplate.queryForObject("""
+                select count(*) from inventory i join rm_product p on p.id = i.product_id
+                """ + where, Long.class, args.toArray());
+        List<Object> pageArgs = new ArrayList<>(args);
+        pageArgs.add(safeSize);
+        pageArgs.add((safePage - 1) * safeSize);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                select i.id, i.product_id as "productId", i.warehouse_id as "warehouseId",
+                       i.warehouse_id as "_warehouseId", i.qty,
+                       i.locked_qty as "lockedQty", (i.qty - i.locked_qty) as available,
+                       (select count(*) from inventory_batch b
+                        where b.product_id = i.product_id and b.warehouse_id = i.warehouse_id
+                          and b.qty > 0) as "batchCount",
+                       p.code as "productCode", p.name as "productName", p.spec, p.unit, p.category,
+                       p.safety_stock as "safetyStock", p.avg_cost as "avgCost",
+                       coalesce(i.qty * p.avg_cost, 0) as "stockAmount",
+                       (p.safety_stock is not null and i.qty < p.safety_stock) as warning
+                from inventory i
+                join rm_product p on p.id = i.product_id
+                """ + where + """
+                 order by case when p.safety_stock is not null and i.qty < p.safety_stock
+                               then 0 else 1 end, p.code
+                 limit ? offset ?
+                """, pageArgs.toArray());
+        MasterDataViews.fillWarehouseNames(masterData, rows, "warehouseId", "warehouseName");
+        return new PageResult(rows, total == null ? 0 : total, safePage, safeSize);
+    }
+
     /** 把产品档案里「库存列表要用」的列补到行上，顺带算是否低于安全库存 */
     private void putProductColumns(Map<String, Object> row, ProductInfo product) {
         row.put("productCode", product == null ? null : product.code());
@@ -134,16 +191,51 @@ public class InventoryService implements InventoryPort {
 
     /** 某个产品在某仓的批次库存，按先进先出排序 */
     public List<Map<String, Object>> batchStocks(long productId, long warehouseId) {
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+        return batchStocks(productId, warehouseId, null);
+    }
+
+    /** 不分页的批次库存，可按批次号搜索；保持旧接口返回数组 */
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> batchStocks(long productId, long warehouseId, String keyword) {
+        return (List<Map<String, Object>>) batchStocks(productId, warehouseId, keyword, null, null).records();
+    }
+
+    /** 某产品在某仓的批次库存（可分页、按批次号搜索）；page 为空时返回全量 */
+    public PageResult batchStocks(long productId, long warehouseId, String keyword, Integer page, Integer size) {
+        StringBuilder where = new StringBuilder(
+                " where b.product_id = ? and b.warehouse_id = ? and b.qty <> 0 ");
+        List<Object> args = new ArrayList<>(List.of(productId, warehouseId));
+        if (keyword != null && !keyword.isBlank()) {
+            where.append(" and b.batch_no ilike ? ");
+            args.add("%" + keyword.trim() + "%");
+        }
+        Long total = jdbcTemplate.queryForObject(
+                "select count(*) from inventory_batch b" + where, Long.class, args.toArray());
+        String selectSql = """
                 select b.batch_no as "batchNo", b.qty, b.locked_qty as "lockedQty", b.source,
                        b.work_order_id as "workOrderId", b.location_id as "locationId",
                        to_char(b.created_at, 'YYYY-MM-DD HH24:MI') as "createdAt"
                 from inventory_batch b
-                where b.product_id = ? and b.warehouse_id = ? and b.qty <> 0
-                order by b.created_at, b.id
-                """, productId, warehouseId);
+                """ + where + " order by b.created_at, b.id ";
+        List<Map<String, Object>> rows;
+        int safePage = page == null || page < 1 ? 1 : page;
+        int safeSize = size == null || size < 1 ? 20 : Math.min(size, 100);
+        if (page == null) {
+            // 旧调用不带 page：返回全部批次
+            rows = jdbcTemplate.queryForList(selectSql, args.toArray());
+        } else {
+            List<Object> pageArgs = new ArrayList<>(args);
+            pageArgs.add(safeSize);
+            pageArgs.add((safePage - 1) * safeSize);
+            rows = jdbcTemplate.queryForList(selectSql + " limit ? offset ?", pageArgs.toArray());
+        }
+        enrichBatches(rows, warehouseId);
+        return new PageResult(rows, total == null ? 0 : total, safePage, safeSize);
+    }
+
+    private void enrichBatches(List<Map<String, Object>> rows, long warehouseId) {
         if (rows.isEmpty()) {
-            return rows;
+            return;
         }
         // 工单号归生产、库位编码归仓储：都走各自的只读端口批量补
         List<Long> workOrderIds = rows.stream().map(row -> row.get("workOrderId"))
@@ -164,7 +256,6 @@ public class InventoryService implements InventoryPort {
             row.put("warehouseName", warehouseName);
             row.remove("locationId");
         }
-        return rows;
     }
 
     public PageResult txns(Long productId, String txnType, int page, int size) {

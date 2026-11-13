@@ -46,7 +46,12 @@ public class FileController {
                             @RequestParam(required = false) String storageType,
                             @RequestParam(required = false) String from,
                             @RequestParam(required = false) String to,
-                            @RequestParam(required = false) Integer limit) {
+                            @RequestParam(required = false) Integer limit,
+                            @RequestParam(required = false) Integer page,
+                            @RequestParam(defaultValue = "20") int size) {
+        if (page != null) {
+            return ApiResponse.ok(service.page(bizType, bizId, keyword, storageType, from, to, page, size));
+        }
         return ApiResponse.ok(service.list(bizType, bizId, keyword, storageType, from, to, limit));
     }
 

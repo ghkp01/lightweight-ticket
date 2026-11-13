@@ -36,7 +36,11 @@ public class ApprovalController {
 
     @GetMapping("/flows")
     @PreAuthorize("hasAuthority('system_approval')")
-    public ApiResponse flows() {
+    public ApiResponse flows(@RequestParam(required = false) Integer page,
+                             @RequestParam(required = false) Integer size) {
+        if (page != null) {
+            return ApiResponse.ok(service.flowsPage(page, size == null ? 20 : size));
+        }
         return ApiResponse.ok(service.flows());
     }
 
@@ -221,7 +225,11 @@ public class ApprovalController {
     }
 
     @GetMapping("/tasks")
-    public ApiResponse tasks() {
+    public ApiResponse tasks(@RequestParam(required = false) Integer page,
+                             @RequestParam(required = false) Integer size) {
+        if (page != null) {
+            return ApiResponse.ok(service.myTasksPage(page, size == null ? 20 : size));
+        }
         return ApiResponse.ok(service.myTasks());
     }
 

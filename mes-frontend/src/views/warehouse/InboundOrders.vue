@@ -116,13 +116,17 @@ const loadSummary = async () => {
   summary.value = await api.get('/inbound-orders/summary')
 }
 
-/** 库位下拉按当前仓库过滤，没有维护库位时允许手填 */
-const loadLocations = async () => {
+/** 库位下拉按当前仓库过滤并走服务端搜索，没有维护库位时允许手填 */
+const loadLocations = async (keyword = '') => {
   if (!form.warehouseId) {
     locations.value = []
     return
   }
-  locations.value = (await api.get('/locations/options', { warehouseId: form.warehouseId }).catch(() => [])) || []
+  locations.value = (await api.get('/locations/options', {
+    warehouseId: form.warehouseId,
+    keyword: keyword || undefined,
+    limit: 20
+  }).catch(() => [])) || []
 }
 
 const openCreate = async () => {
@@ -326,19 +330,19 @@ onMounted(async () => {
 
     <div class="panel">
       <div class="filter-bar">
-        <el-input v-model="keyword" placeholder="入库单号 / 供应商" clearable style="width: 230px" @keyup.enter="load" />
-        <el-select v-model="type" placeholder="全部类型" clearable style="width: 140px" @change="load">
+        <el-input v-model="keyword" placeholder="入库单号 / 供应商" clearable style="width: 230px" @keyup.enter="reload" />
+        <el-select v-model="type" placeholder="全部类型" clearable style="width: 140px" @change="reload">
           <el-option label="采购入库" value="PURCHASE" />
           <el-option label="退货入库" value="RETURN" />
           <el-option label="其他入库" value="OTHER" />
         </el-select>
-        <el-select v-model="status" placeholder="全部状态" clearable style="width: 140px" @change="load">
+        <el-select v-model="status" placeholder="全部状态" clearable style="width: 140px" @change="reload">
           <el-option label="草稿" value="DRAFT" />
           <el-option label="待检" value="PENDING_QC" />
           <el-option label="已完成" value="COMPLETED" />
           <el-option label="已取消" value="CANCELLED" />
         </el-select>
-        <el-button type="primary" plain @click="load">查询</el-button>
+        <el-button type="primary" plain @click="reload">查询</el-button>
         <div class="spacer"></div>
         <TableToolbar :table="table" export-api="/inbound-orders" export-name="入库单" @applied="reload" />
         <span class="toolbar-tip">共 {{ total }} 张入库单</span>
@@ -415,7 +419,7 @@ onMounted(async () => {
             <ReferenceSelect v-model="form.warehouseId" url="/options/warehouses"
                              :initial-label="form.warehouseLabel"
                              placeholder="输入仓库编码或名称搜索"
-                             @select="loadLocations" />
+                             @select="() => loadLocations()" />
           </el-form-item>
           <el-form-item label="供应商">
             <el-input v-model="form.supplier" placeholder="到货供应商名称（选填）" />
@@ -470,6 +474,9 @@ onMounted(async () => {
                 <el-select
                   v-model="row.locationCode"
                   filterable
+                  remote
+                  reserve-keyword
+                  :remote-method="loadLocations"
                   allow-create
                   default-first-option
                   clearable

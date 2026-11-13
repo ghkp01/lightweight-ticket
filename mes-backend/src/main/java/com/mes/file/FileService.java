@@ -2,6 +2,7 @@ package com.mes.file;
 
 import com.mes.common.BizException;
 import com.mes.common.CodeGenerator;
+import com.mes.common.PageResult;
 import com.mes.platform.audit.OperLogService;
 import com.mes.security.CurrentUser;
 import org.slf4j.Logger;
@@ -106,29 +107,61 @@ public class FileService {
         return detail(id);
     }
 
+    private static final String SELECT_SQL = """
+            select id, file_no as "fileNo", original_name as "originalName", ext,
+                   content_type as "contentType", size_bytes as "sizeBytes", sha256,
+                   storage_type as "storageType", storage_key as "storageKey", bucket,
+                   biz_type as "bizType", biz_id as "bizId", biz_no as "bizNo",
+                   uploaded_by as "uploadedBy",
+                   to_char(uploaded_at, 'YYYY-MM-DD HH24:MI') as "uploadedAt"
+            from attach_file
+            where deleted = false
+            """;
+
     public List<Map<String, Object>> list(String bizType, Long bizId, String keyword, String storageType,
                                           String from, String to, Integer limit) {
-        StringBuilder sql = new StringBuilder("""
-                select id, file_no as "fileNo", original_name as "originalName", ext,
-                       content_type as "contentType", size_bytes as "sizeBytes", sha256,
-                       storage_type as "storageType", storage_key as "storageKey", bucket,
-                       biz_type as "bizType", biz_id as "bizId", biz_no as "bizNo",
-                       uploaded_by as "uploadedBy",
-                       to_char(uploaded_at, 'YYYY-MM-DD HH24:MI') as "uploadedAt"
-                from attach_file
-                where deleted = false
-                """);
         List<Object> params = new ArrayList<>();
+        String where = where(bizType, bizId, keyword, storageType, from, to, params);
+        int size = limit == null || limit <= 0 ? 200 : Math.min(limit, 1000);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                SELECT_SQL + where + " order by id desc limit " + size, params.toArray());
+        rows.forEach(this::decorate);
+        return rows;
+    }
+
+    /** 文件台账分页：附件只增不减，列表页改为后端分页 */
+    public PageResult page(String bizType, Long bizId, String keyword, String storageType,
+                           String from, String to, int page, int size) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 200);
+        List<Object> countParams = new ArrayList<>();
+        String countWhere = where(bizType, bizId, keyword, storageType, from, to, countParams);
+        Long total = jdbcTemplate.queryForObject(
+                "select count(*) from attach_file where deleted = false " + countWhere,
+                Long.class, countParams.toArray());
+        List<Object> params = new ArrayList<>();
+        String pageWhere = where(bizType, bizId, keyword, storageType, from, to, params);
+        params.add(safeSize);
+        params.add((safePage - 1) * safeSize);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                SELECT_SQL + pageWhere + " order by id desc limit ? offset ?", params.toArray());
+        rows.forEach(this::decorate);
+        return new PageResult(rows, total == null ? 0 : total, safePage, safeSize);
+    }
+
+    private String where(String bizType, Long bizId, String keyword, String storageType,
+                         String from, String to, List<Object> params) {
+        StringBuilder where = new StringBuilder();
         if (bizType != null && !bizType.isBlank()) {
-            sql.append(" and biz_type = ?");
+            where.append(" and biz_type = ?");
             params.add(bizType.trim().toUpperCase(Locale.ROOT));
         }
         if (bizId != null) {
-            sql.append(" and biz_id = ?");
+            where.append(" and biz_id = ?");
             params.add(bizId);
         }
         if (keyword != null && !keyword.isBlank()) {
-            sql.append(" and (original_name ilike ? or file_no ilike ? or biz_no ilike ? or uploaded_by ilike ?)");
+            where.append(" and (original_name ilike ? or file_no ilike ? or biz_no ilike ? or uploaded_by ilike ?)");
             String like = "%" + keyword.trim() + "%";
             params.add(like);
             params.add(like);
@@ -136,22 +169,18 @@ public class FileService {
             params.add(like);
         }
         if (storageType != null && !storageType.isBlank()) {
-            sql.append(" and storage_type = ?");
+            where.append(" and storage_type = ?");
             params.add(storageType.trim().toUpperCase(Locale.ROOT));
         }
         if (from != null && !from.isBlank()) {
-            sql.append(" and uploaded_at >= cast(? as date)");
+            where.append(" and uploaded_at >= cast(? as date)");
             params.add(from.trim());
         }
         if (to != null && !to.isBlank()) {
-            sql.append(" and uploaded_at < cast(? as date) + 1");
+            where.append(" and uploaded_at < cast(? as date) + 1");
             params.add(to.trim());
         }
-        int size = limit == null || limit <= 0 ? 200 : Math.min(limit, 1000);
-        sql.append(" order by id desc limit ").append(size);
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql.toString(), params.toArray());
-        rows.forEach(this::decorate);
-        return rows;
+        return where.toString();
     }
 
     public Map<String, Object> detail(Long id) {

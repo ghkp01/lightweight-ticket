@@ -49,7 +49,12 @@ public class CustomFieldController {
     /** 设计器用：全部字段（含停用、所有工厂），需要字段管理权限 */
     @GetMapping("/definitions")
     @PreAuthorize("hasAuthority('system_custom_field')")
-    public ApiResponse definitions(@RequestParam String entityType) {
+    public ApiResponse definitions(@RequestParam String entityType,
+                                   @RequestParam(required = false) Integer page,
+                                   @RequestParam(required = false) Integer size) {
+        if (page != null) {
+            return ApiResponse.ok(service.definitionsPage(entityType, true, page, size == null ? 20 : size));
+        }
         return ApiResponse.ok(service.definitions(entityType, true));
     }
 

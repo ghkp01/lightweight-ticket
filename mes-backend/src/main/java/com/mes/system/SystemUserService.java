@@ -71,6 +71,11 @@ public class SystemUserService implements UserDirectoryPort {
 
     /** 派工选人下拉：只返回启用用户，带组织与岗位，按组织（含下级）与关键字过滤 */
     public List<Map<String, Object>> options(String keyword, Long orgId) {
+        return options(keyword, orgId, null);
+    }
+
+    /** limit 为空时保持原行为（返回全部匹配），供派工等需要完整名单的场景使用 */
+    public List<Map<String, Object>> options(String keyword, Long orgId, Integer limit) {
         StringBuilder sql = new StringBuilder("""
                 select u.id, u.username, u.real_name as "realName", u.org_id as "orgId",
                        o.name as "orgName", u.position, u.employee_no as "employeeNo",
@@ -93,6 +98,10 @@ public class SystemUserService implements UserDirectoryPort {
             args.add(orgId);
         }
         sql.append(" order by coalesce(o.sort, 999), u.org_id nulls last, u.id");
+        if (limit != null) {
+            sql.append(" limit ?");
+            args.add(Math.max(1, Math.min(limit, 100)));
+        }
         return jdbcTemplate.queryForList(sql.toString(), args.toArray());
     }
 

@@ -31,8 +31,9 @@ public class PurchaseReturnController {
     }
 
     @GetMapping("/returnable-inbounds")
-    public ApiResponse returnableInbounds(@RequestParam(required = false) String keyword) {
-        return ApiResponse.ok(service.returnableInbounds(keyword));
+    public ApiResponse returnableInbounds(@RequestParam(required = false) String keyword,
+                                          @RequestParam(required = false) Integer limit) {
+        return ApiResponse.ok(service.returnableInbounds(keyword, limit));
     }
 
     @GetMapping("/inbound-orders/{inboundOrderId}/returnable")

@@ -5,6 +5,9 @@ import { api } from '../../api'
 
 const loading = ref(false)
 const rows = ref<any[]>([])
+const total = ref(0)
+const page = ref(1)
+const size = ref(20)
 const scopes = ref<string[]>([])
 const drawer = ref(false)
 const saving = ref(false)
@@ -21,9 +24,33 @@ const scopeLabels: Record<string, string> = {
 const load = async () => {
   loading.value = true
   try {
-    rows.value = (await api.get('/system/api-tokens')) || []
+    const data = await api.get('/system/api-tokens', {
+      page: page.value,
+      size: size.value
+    })
+    rows.value = data?.records || []
+    total.value = data?.total || 0
   } finally {
     loading.value = false
+  }
+}
+
+const changePage = (value: number) => {
+  page.value = value
+  load()
+}
+
+const changeSize = () => {
+  page.value = 1
+  load()
+}
+
+/** 删除后刷新：当前页空了就回上一页 */
+const refresh = async () => {
+  await load()
+  if (!rows.value.length && page.value > 1) {
+    page.value -= 1
+    await load()
   }
 }
 
@@ -82,7 +109,7 @@ const remove = async (row: any) => {
   })
   await api.delete(`/system/api-tokens/${row.id}`)
   ElMessage.success('已删除')
-  await load()
+  await refresh()
 }
 
 const scopeText = (value: any) =>
@@ -156,6 +183,17 @@ onMounted(async () => {
             </template>
           </el-table-column>
         </el-table>
+      </div>
+      <div class="pager">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="size"
+          :total="total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next"
+          @current-change="changePage"
+          @size-change="changeSize"
+        />
       </div>
     </div>
 

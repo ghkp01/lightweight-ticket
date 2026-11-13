@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, fmtQty } from '../../api'
 import DataTable from '../../components/DataTable.vue'
 import TableToolbar from '../../components/TableToolbar.vue'
+import ReferenceSelect from '../../components/ReferenceSelect.vue'
 import { useTableView } from '../../composables/useTableView'
 
 const loading = ref(false)
@@ -82,10 +83,30 @@ const changePage = (value: number) => {
 // ---------------------------------------------------------------- 派工
 const assignDialog = ref(false)
 const assigning = ref(false)
-const orderOptions = ref<any[]>([])
 const orderItems = ref<any[]>([])
 const orderLoading = ref(false)
 const assigneeOptions = ref<any[]>([])
+const assigneeLoading = ref(false)
+const searchAssignees = async (keyword = '') => {
+  assigneeLoading.value = true
+  try {
+    const rows = await api.get('/bom-tasks/assignees', {
+      keyword: keyword || undefined,
+      limit: 20
+    })
+    // 保留当前已选技术员，避免远程换关键字后标签丢失
+    const keep = assigneeOptions.value.filter(
+      (item) => item.id === assignForm.assigneeId || item.id === reassignForm.assigneeId
+    )
+    const merged = [...(rows || [])]
+    keep.forEach((item) => {
+      if (!merged.some((row) => row.id === item.id)) merged.push(item)
+    })
+    assigneeOptions.value = merged
+  } finally {
+    assigneeLoading.value = false
+  }
+}
 const selectedItems = ref<any[]>([])
 const assignForm = reactive<any>({ salesOrderId: null, assigneeId: null, dueDate: '', remark: '' })
 
@@ -95,14 +116,8 @@ const openAssign = async () => {
   Object.assign(assignForm, { salesOrderId: null, assigneeId: null, dueDate: '', remark: '' })
   orderItems.value = []
   selectedItems.value = []
+  await searchAssignees('')
   assignDialog.value = true
-  if (!orderOptions.value.length) {
-    const data = await api.get('/sales-orders', { status: 'CONFIRMED', page: 1, size: 100 })
-    orderOptions.value = data.records || []
-  }
-  if (!assigneeOptions.value.length) {
-    assigneeOptions.value = await api.get('/bom-tasks/assignees')
-  }
 }
 
 const loadOrderItems = async () => {
@@ -166,15 +181,13 @@ const reassignDialog = ref(false)
 const reassignForm = reactive<any>({ id: null, productName: '', assigneeId: null, dueDate: '' })
 
 const openReassign = async (row: any) => {
-  if (!assigneeOptions.value.length) {
-    assigneeOptions.value = await api.get('/bom-tasks/assignees')
-  }
   Object.assign(reassignForm, {
     id: row.id,
     productName: row.productName,
     assigneeId: row.assigneeId,
     dueDate: row.dueDate || ''
   })
+  await searchAssignees(row.assigneeName || '')
   reassignDialog.value = true
 }
 
@@ -278,17 +291,26 @@ onMounted(async () => {
       <el-form label-position="top">
         <div class="form-grid">
           <el-form-item label="销售订单" required>
-            <el-select v-model="assignForm.salesOrderId" filterable placeholder="选择已确认订单" style="width: 100%" @change="loadOrderItems">
-              <el-option
-                v-for="item in orderOptions"
-                :key="item.id"
-                :label="`${item.orderNo} · ${item.customerName || ''}`"
-                :value="item.id"
-              />
-            </el-select>
+            <ReferenceSelect
+              v-model="assignForm.salesOrderId"
+              url="/sales-orders/options"
+              :params="{ status: 'CONFIRMED' }"
+              code-field="orderNo"
+              label-field="customerName"
+              placeholder="输入订单号或客户搜索（仅已确认）"
+              @select="loadOrderItems"
+            />
           </el-form-item>
           <el-form-item label="技术员" required>
-            <el-select v-model="assignForm.assigneeId" filterable placeholder="选择技术员" style="width: 100%">
+            <el-select
+              v-model="assignForm.assigneeId"
+              filterable
+              remote
+              :remote-method="searchAssignees"
+              :loading="assigneeLoading"
+              placeholder="选择技术员"
+              style="width: 100%"
+            >
               <el-option
                 v-for="item in assigneeOptions"
                 :key="item.id"
@@ -344,7 +366,14 @@ onMounted(async () => {
           <span>{{ reassignForm.productName }}</span>
         </el-form-item>
         <el-form-item label="技术员" required>
-          <el-select v-model="reassignForm.assigneeId" filterable style="width: 100%">
+          <el-select
+            v-model="reassignForm.assigneeId"
+            filterable
+            remote
+            :remote-method="searchAssignees"
+            :loading="assigneeLoading"
+            style="width: 100%"
+          >
             <el-option
               v-for="item in assigneeOptions"
               :key="item.id"

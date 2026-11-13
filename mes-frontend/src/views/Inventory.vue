@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api, fmtQty } from '../api'
@@ -15,6 +15,9 @@ const loading = ref(false)
 const keyword = ref('')
 const warehouseId = ref<any>('')
 const onlyWarning = ref(false)
+const page = ref(1)
+const size = ref(20)
+const total = ref(0)
 
 // 表格视图：列显示 / 冻结 / 列宽与默认筛选按账号保存
 const table = useTableView({
@@ -41,7 +44,9 @@ const table = useTableView({
     keyword.value = filters.keyword || ''
     warehouseId.value = filters.warehouseId || ''
     onlyWarning.value = Boolean(filters.onlyWarning)
-  }
+  },
+  getPageSize: () => size.value,
+  setPageSize: (value) => { size.value = value }
 })
 
 const dialog = ref(false)
@@ -58,15 +63,6 @@ const form = reactive<any>({
   locationCode: ''
 })
 // 入库时可按库位上架：库位跟着所选仓库走，不选就留在「未指定库位」
-const locations = ref<any[]>([])
-
-const loadLocations = async () => {
-  if (!form.warehouseId) {
-    locations.value = []
-    return
-  }
-  locations.value = (await api.get('/locations', { warehouseId: form.warehouseId })) || []
-}
 
 const txnDrawer = ref(false)
 const txnLoading = ref(false)
@@ -79,6 +75,10 @@ const batchDrawer = ref(false)
 const batchLoading = ref(false)
 const batchRows = ref<any[]>([])
 const batchTarget = ref<any>(null)
+const batchKeyword = ref('')
+const batchPage = ref(1)
+const batchSize = 20
+const batchTotal = ref(0)
 
 const warningCount = computed(() => rows.value.filter((row) => row.warning).length)
 const totalQty = computed(() => rows.value.reduce((sum, row) => sum + Number(row.qty || 0), 0))
@@ -104,14 +104,23 @@ const rowClassName = ({ row }: any) => (row.warning ? 'warn-row' : '')
 const load = async () => {
   loading.value = true
   try {
-    rows.value = await api.get('/inventory', {
+    const data = await api.get('/inventory', {
       keyword: keyword.value,
       warehouseId: warehouseId.value || undefined,
-      onlyWarning: onlyWarning.value
+      onlyWarning: onlyWarning.value,
+      page: page.value,
+      size: size.value
     })
+    rows.value = data?.records || []
+    total.value = data?.total || 0
   } finally {
     loading.value = false
   }
+}
+
+const reload = () => {
+  page.value = 1
+  load()
 }
 
 const openStock = async (type: 'in' | 'out', row?: any) => {
@@ -140,14 +149,7 @@ const openStock = async (type: 'in' | 'out', row?: any) => {
     locationCode: ''
   })
   dialog.value = true
-  loadLocations()
 }
-
-// 换仓库就把库位下拉一起换掉，避免选了 A 仓的库位去入 B 仓
-watch(() => form.warehouseId, () => {
-  form.locationCode = ''
-  if (dialog.value) loadLocations()
-})
 
 const submitStock = async () => {
   if (!form.productId || !form.warehouseId || !form.qty || form.qty <= 0) {
@@ -172,17 +174,36 @@ const submitStock = async () => {
   }
 }
 
-const openBatches = async (row: any) => {
-  batchTarget.value = row
-  batchDrawer.value = true
+const loadBatches = async (row: any, page = 1) => {
   batchLoading.value = true
   try {
-    batchRows.value = await api.get(`/inventory/${row.productId}/batches`, {
-      warehouseId: row.warehouseId
+    batchPage.value = page
+    const data = await api.get(`/inventory/${row.productId}/batches`, {
+      warehouseId: row.warehouseId,
+      keyword: batchKeyword.value.trim() || undefined,
+      page,
+      size: batchSize
     })
+    batchRows.value = data?.records || []
+    batchTotal.value = Number(data?.total || 0)
   } finally {
     batchLoading.value = false
   }
+}
+
+const openBatches = (row: any) => {
+  batchTarget.value = row
+  batchKeyword.value = ''
+  batchDrawer.value = true
+  loadBatches(row, 1)
+}
+
+const searchBatches = () => {
+  if (batchTarget.value) loadBatches(batchTarget.value, 1)
+}
+
+const changeBatchPage = (value: number) => {
+  if (batchTarget.value) loadBatches(batchTarget.value, value)
 }
 
 const goTrace = (batchNo: string) => {
@@ -244,13 +265,13 @@ onMounted(async () => {
 
     <div class="panel">
       <div class="filter-bar">
-        <el-input v-model="keyword" placeholder="产品编码 / 名称" clearable style="width: 230px" @keyup.enter="load" />
+        <el-input v-model="keyword" placeholder="产品编码 / 名称" clearable style="width: 230px" @keyup.enter="reload" />
         <ReferenceSelect v-model="warehouseId" url="/options/warehouses"
-                         placeholder="全部仓库" style="width: 140px" @select="load" />
-        <el-checkbox v-model="onlyWarning" @change="load">只看预警</el-checkbox>
-        <el-button type="primary" plain @click="load">查询</el-button>
+                         placeholder="全部仓库" style="width: 140px" @select="reload" />
+        <el-checkbox v-model="onlyWarning" @change="reload">只看预警</el-checkbox>
+        <el-button type="primary" plain @click="reload">查询</el-button>
         <div class="spacer"></div>
-        <TableToolbar :table="table" export-api="/inventory" export-name="库存结存" @applied="load" />
+        <TableToolbar :table="table" export-api="/inventory" export-name="库存结存" @applied="reload" />
       </div>
 
       <div class="table-wrap">
@@ -280,6 +301,18 @@ onMounted(async () => {
           </template>
         </DataTable>
       </div>
+
+      <div class="pager">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="size"
+          :total="total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next"
+          @current-change="load"
+          @size-change="load"
+        />
+      </div>
     </div>
 
     <el-dialog draggable append-to-body v-model="dialog" :title="dialogType === 'in' ? '库存入库' : '库存出库'" width="520px">
@@ -293,7 +326,8 @@ onMounted(async () => {
           <el-form-item label="仓库" required>
             <ReferenceSelect v-model="form.warehouseId" url="/options/warehouses"
                              :initial-label="form.warehouseLabel"
-                             placeholder="输入仓库编码或名称搜索" />
+                             placeholder="输入仓库编码或名称搜索"
+                             @select="form.locationCode = ''" />
           </el-form-item>
           <el-form-item :label="dialogType === 'in' ? '入库数量' : '出库数量'" required>
             <el-input-number v-model="form.qty" :min="0.01" :precision="2" style="width: 100%" />
@@ -302,23 +336,16 @@ onMounted(async () => {
             <el-input v-model="form.batchNo" placeholder="来料批次 / 合格证号，留空按入库单号生成" />
           </el-form-item>
           <el-form-item v-if="dialogType === 'in'" label="上架库位" class="full">
-            <el-select
+            <ReferenceSelect
+              :key="form.warehouseId || 'none'"
               v-model="form.locationCode"
-              clearable
-              filterable
+              url="/locations/options"
+              :params="{ warehouseId: form.warehouseId || undefined }"
+              value-field="code"
+              code-field="code"
+              label-field="name"
               placeholder="不选则留在「未指定库位」，之后可在库位页移库"
-              style="width: 100%"
-            >
-              <el-option
-                v-for="item in locations"
-                :key="item.id"
-                :label="`${item.code} · ${item.name}`"
-                :value="item.code"
-              />
-            </el-select>
-            <div v-if="!locations.length" class="muted" style="font-size: 12px; margin-top: 4px">
-              当前仓库还没有库位，可先到「库位管理」建好再来入库。
-            </div>
+            />
           </el-form-item>
           <el-form-item label="备注" class="full">
             <el-input v-model="form.remark" :placeholder="dialogType === 'in' ? '采购到货、盘盈等' : '领用、盘亏等'" />
@@ -362,6 +389,18 @@ onMounted(async () => {
       </div>
     </el-drawer>
     <el-drawer append-to-body v-model="batchDrawer" size="640px" :title="`批次库存 · ${batchTarget?.productName || ''}`">
+      <div class="filter-bar" style="margin-bottom: 8px">
+        <el-input
+          v-model="batchKeyword"
+          placeholder="批次号"
+          clearable
+          style="width: 220px"
+          @keyup.enter="searchBatches"
+          @clear="searchBatches"
+        />
+        <el-button type="primary" plain @click="searchBatches">查询</el-button>
+        <span class="toolbar-tip">共 {{ batchTotal }} 批</span>
+      </div>
       <el-table v-loading="batchLoading" :data="batchRows" size="small">
         <el-table-column label="批次号" min-width="170">
           <template #default="{ row }"><span class="mono">{{ row.batchNo }}</span></template>
@@ -386,6 +425,16 @@ onMounted(async () => {
           </template>
         </el-table-column>
       </el-table>
+      <el-pagination
+        v-if="batchTotal > batchSize"
+        size="small"
+        layout="total, prev, pager, next"
+        :total="batchTotal"
+        :page-size="batchSize"
+        :current-page="batchPage"
+        style="margin-top: 8px; justify-content: flex-end"
+        @current-change="changeBatchPage"
+      />
       <div class="batch-tip">按先进先出排列，出库、领料、发货都从最早的批次开始扣。点「追溯」看这批的来料与流向。</div>
     </el-drawer>
   </div>

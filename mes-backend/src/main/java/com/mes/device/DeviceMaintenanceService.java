@@ -2,6 +2,7 @@ package com.mes.device;
 
 import com.mes.common.BizException;
 import com.mes.common.CodeGenerator;
+import com.mes.common.PageResult;
 import com.mes.device.api.MaintenancePort;
 import com.mes.notice.api.NoticeMessage;
 import com.mes.notice.api.NoticePort;
@@ -90,9 +91,47 @@ public class DeviceMaintenanceService implements MaintenancePort {
 
     // ---------------------------------------------------------------- 点检
 
+    private static final String CHECK_SELECT = """
+            select t.id, t.task_no as "taskNo", t.plan_date as "planDate", t.status,
+                   t.device_id as "deviceId", d.code as "deviceCode", d.name as "deviceName",
+                   d.status as "deviceStatus", wc.name as "workCenterName",
+                   t.checker, t.remark,
+                   to_char(t.checked_at, 'YYYY-MM-DD HH24:MI') as "checkedAt",
+                   (select count(*) from device_check_result r where r.task_id = t.id) as "itemCount",
+                   (select count(*) from device_check_result r
+                     where r.task_id = t.id and r.result = 'NG') as "ngCount"
+            from device_check_task t
+            join work_center_device d on d.id = t.device_id
+            join rm_work_center wc on wc.id = d.work_center_id
+            """;
+
     public List<Map<String, Object>> checkTasks(LocalDate date, Long deviceId, String status) {
-        StringBuilder where = new StringBuilder(" where t.plan_date = ? ");
         List<Object> args = new ArrayList<>();
+        String where = checkWhere(date, deviceId, status, args);
+        return jdbcTemplate.queryForList(
+                CHECK_SELECT + where + " order by t.status desc, d.code", args.toArray());
+    }
+
+    /** 点检任务分页：一天内设备多时列表会很长，改为后端分页 */
+    public PageResult checkPage(LocalDate date, Long deviceId, String status, int page, int size) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 200);
+        List<Object> countArgs = new ArrayList<>();
+        String countWhere = checkWhere(date, deviceId, status, countArgs);
+        Long total = jdbcTemplate.queryForObject(
+                "select count(*) from device_check_task t " + countWhere, Long.class, countArgs.toArray());
+        List<Object> args = new ArrayList<>();
+        String pageWhere = checkWhere(date, deviceId, status, args);
+        args.add(safeSize);
+        args.add((safePage - 1) * safeSize);
+        List<Map<String, Object>> records = jdbcTemplate.queryForList(
+                CHECK_SELECT + pageWhere + " order by t.status desc, d.code limit ? offset ?",
+                args.toArray());
+        return new PageResult(records, total == null ? 0 : total, safePage, safeSize);
+    }
+
+    private String checkWhere(LocalDate date, Long deviceId, String status, List<Object> args) {
+        StringBuilder where = new StringBuilder(" where t.plan_date = ? ");
         args.add(Date.valueOf(date == null ? LocalDate.now() : date));
         if (deviceId != null) {
             where.append(" and t.device_id = ? ");
@@ -102,19 +141,7 @@ public class DeviceMaintenanceService implements MaintenancePort {
             where.append(" and t.status = ? ");
             args.add(status);
         }
-        return jdbcTemplate.queryForList("""
-                select t.id, t.task_no as "taskNo", t.plan_date as "planDate", t.status,
-                       t.device_id as "deviceId", d.code as "deviceCode", d.name as "deviceName",
-                       d.status as "deviceStatus", wc.name as "workCenterName",
-                       t.checker, t.remark,
-                       to_char(t.checked_at, 'YYYY-MM-DD HH24:MI') as "checkedAt",
-                       (select count(*) from device_check_result r where r.task_id = t.id) as "itemCount",
-                       (select count(*) from device_check_result r
-                         where r.task_id = t.id and r.result = 'NG') as "ngCount"
-                from device_check_task t
-                join work_center_device d on d.id = t.device_id
-                join rm_work_center wc on wc.id = d.work_center_id
-                """ + where + " order by t.status desc, d.code", args.toArray());
+        return where.toString();
     }
 
     public Map<String, Object> checkDetail(long taskId) {
@@ -424,9 +451,47 @@ public class DeviceMaintenanceService implements MaintenancePort {
 
     // ---------------------------------------------------------------- 故障
 
+    private static final String FAULT_SELECT = """
+            select f.id, f.fault_no as "faultNo", f.device_id as "deviceId",
+                   d.code as "deviceCode", d.name as "deviceName",
+                   wc.name as "workCenterName", f.symptom, f.cause, f.action,
+                   f.downtime_minutes as "downtimeMinutes", f.reporter, f.handler, f.status,
+                   to_char(f.occurred_at, 'YYYY-MM-DD HH24:MI') as "occurredAt",
+                   to_char(f.recovered_at, 'YYYY-MM-DD HH24:MI') as "recoveredAt"
+            from device_fault f
+            join work_center_device d on d.id = f.device_id
+            join rm_work_center wc on wc.id = d.work_center_id
+            """;
+
     public List<Map<String, Object>> faults(String status, Long deviceId) {
-        StringBuilder where = new StringBuilder(" where 1 = 1 ");
         List<Object> args = new ArrayList<>();
+        String where = faultWhere(status, deviceId, args);
+        args.add(200);
+        return jdbcTemplate.queryForList(
+                FAULT_SELECT + where + " order by f.status desc, f.occurred_at desc limit ?",
+                args.toArray());
+    }
+
+    /** 故障记录分页：故障单持续累积，列表页改为后端分页 */
+    public PageResult faultPage(String status, Long deviceId, int page, int size) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 200);
+        List<Object> countArgs = new ArrayList<>();
+        String countWhere = faultWhere(status, deviceId, countArgs);
+        Long total = jdbcTemplate.queryForObject(
+                "select count(*) from device_fault f " + countWhere, Long.class, countArgs.toArray());
+        List<Object> args = new ArrayList<>();
+        String pageWhere = faultWhere(status, deviceId, args);
+        args.add(safeSize);
+        args.add((safePage - 1) * safeSize);
+        List<Map<String, Object>> records = jdbcTemplate.queryForList(
+                FAULT_SELECT + pageWhere + " order by f.status desc, f.occurred_at desc limit ? offset ?",
+                args.toArray());
+        return new PageResult(records, total == null ? 0 : total, safePage, safeSize);
+    }
+
+    private String faultWhere(String status, Long deviceId, List<Object> args) {
+        StringBuilder where = new StringBuilder(" where 1 = 1 ");
         if (status != null && !status.isBlank()) {
             where.append(" and f.status = ? ");
             args.add(status);
@@ -435,17 +500,7 @@ public class DeviceMaintenanceService implements MaintenancePort {
             where.append(" and f.device_id = ? ");
             args.add(deviceId);
         }
-        return jdbcTemplate.queryForList("""
-                select f.id, f.fault_no as "faultNo", f.device_id as "deviceId",
-                       d.code as "deviceCode", d.name as "deviceName",
-                       wc.name as "workCenterName", f.symptom, f.cause, f.action,
-                       f.downtime_minutes as "downtimeMinutes", f.reporter, f.handler, f.status,
-                       to_char(f.occurred_at, 'YYYY-MM-DD HH24:MI') as "occurredAt",
-                       to_char(f.recovered_at, 'YYYY-MM-DD HH24:MI') as "recoveredAt"
-                from device_fault f
-                join work_center_device d on d.id = f.device_id
-                join rm_work_center wc on wc.id = d.work_center_id
-                """ + where + " order by f.status desc, f.occurred_at desc limit 200", args.toArray());
+        return where.toString();
     }
 
     /** 报修：建故障单并把设备置为停机，避免排产继续往这台设备上压活 */

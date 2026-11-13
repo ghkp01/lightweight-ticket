@@ -1,11 +1,13 @@
 package com.mes.offline;
 
+import com.mes.common.PageResult;
 import com.mes.offline.api.OfflineSyncPort;
 import com.mes.platform.config.ConfigService;
 import com.mes.security.CurrentUser;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -78,15 +80,53 @@ public class OfflineSyncService implements OfflineSyncPort {
                 """, retentionDays());
     }
 
+    private static final String SELECT_SQL = """
+            select id, idem_key as "key", user_name as "userName", method, path,
+                   status_code as "statusCode",
+                   to_char(created_at, 'YYYY-MM-DD HH24:MI:SS') as "createdAt"
+            from sys_offline_key
+            """;
+
     /** 运维排查用：最近的重传记录 */
     public List<Map<String, Object>> recent(int limit) {
+        return recent(null, limit);
+    }
+
+    public List<Map<String, Object>> recent(String keyword, int limit) {
         int size = limit <= 0 ? 50 : Math.min(limit, 200);
-        return jdbcTemplate.queryForList("""
-                select id, idem_key as "key", user_name as "userName", method, path,
-                       status_code as "statusCode",
-                       to_char(created_at, 'YYYY-MM-DD HH24:MI:SS') as "createdAt"
-                from sys_offline_key order by id desc limit ?
-                """, size);
+        List<Object> args = new ArrayList<>();
+        String where = where(keyword, args);
+        args.add(size);
+        return jdbcTemplate.queryForList(
+                SELECT_SQL + where + " order by id desc limit ?", args.toArray());
+    }
+
+    /** 重传记录分页：幂等键按保留天数累积，排查页改为后端分页 */
+    public PageResult page(String keyword, int page, int size) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 200);
+        List<Object> countArgs = new ArrayList<>();
+        String countWhere = where(keyword, countArgs);
+        Long total = jdbcTemplate.queryForObject(
+                "select count(*) from sys_offline_key " + countWhere, Long.class, countArgs.toArray());
+        List<Object> args = new ArrayList<>();
+        String pageWhere = where(keyword, args);
+        args.add(safeSize);
+        args.add((safePage - 1) * safeSize);
+        List<Map<String, Object>> records = jdbcTemplate.queryForList(
+                SELECT_SQL + pageWhere + " order by id desc limit ? offset ?", args.toArray());
+        return new PageResult(records, total == null ? 0 : total, safePage, safeSize);
+    }
+
+    private String where(String keyword, List<Object> args) {
+        if (keyword == null || keyword.isBlank()) {
+            return "";
+        }
+        String like = "%" + keyword.trim() + "%";
+        args.add(like);
+        args.add(like);
+        args.add(like);
+        return " where (idem_key ilike ? or user_name ilike ? or path ilike ?) ";
     }
 
     /** 移动端「离线待同步」页头用：开关、上限、保留天数、服务端时间 */

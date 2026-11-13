@@ -35,6 +35,13 @@ public class SalesController {
                 customFieldKey, customFieldValue));
     }
 
+    @GetMapping("/options")
+    public ApiResponse options(@RequestParam(required = false) String keyword,
+                               @RequestParam(required = false) String status,
+                               @RequestParam(defaultValue = "20") int limit) {
+        return ApiResponse.ok(service.options(keyword, status, limit));
+    }
+
     @GetMapping("/{id}")
     public ApiResponse detail(@PathVariable long id) {
         return ApiResponse.ok(service.detail(id));

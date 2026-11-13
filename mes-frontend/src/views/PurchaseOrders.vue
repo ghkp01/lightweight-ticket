@@ -398,18 +398,18 @@ onMounted(async () => {
           placeholder="采购单号 / 供应商 / 备注"
           clearable
           style="width: 230px"
-          @keyup.enter="load"
+          @keyup.enter="reload"
         />
         <ReferenceSelect v-model="supplierFilter" url="/suppliers/options"
-                         placeholder="全部供应商" style="width: 180px" @select="load" />
-        <el-select v-model="status" placeholder="全部状态" clearable style="width: 130px" @change="load">
+                         placeholder="全部供应商" style="width: 180px" @select="reload" />
+        <el-select v-model="status" placeholder="全部状态" clearable style="width: 130px" @change="reload">
           <el-option label="草稿" value="DRAFT" />
           <el-option label="待到货" value="CONFIRMED" />
           <el-option label="部分到货" value="PARTIAL" />
           <el-option label="已到货" value="RECEIVED" />
           <el-option label="已取消" value="CANCELLED" />
         </el-select>
-        <el-button type="primary" plain @click="load">查询</el-button>
+        <el-button type="primary" plain @click="reload">查询</el-button>
         <el-button plain @click="reset">重置</el-button>
         <div class="spacer"></div>
         <TableToolbar :table="table" export-api="/purchase-orders" export-name="采购订单" @applied="reload" />

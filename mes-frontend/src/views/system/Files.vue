@@ -9,6 +9,9 @@ import { useTableView } from '../../composables/useTableView'
 const loading = ref(false)
 const testing = ref(false)
 const rows = ref<any[]>([])
+const page = ref(1)
+const size = ref(20)
+const total = ref(0)
 const storageInfo = ref<any>({})
 
 const filters = reactive({
@@ -53,7 +56,10 @@ const table = useTableView({
   }
 })
 
-const reload = () => load()
+const reload = () => {
+  page.value = 1
+  load()
+}
 
 const bizLabel = (value: any) =>
   bizOptions.find((item) => item.value === value)?.label || (value ? String(value) : '-')
@@ -75,12 +81,19 @@ const load = async () => {
       keyword: filters.keyword || undefined,
       from: filters.range?.[0] || undefined,
       to: filters.range?.[1] || undefined,
-      limit: 300
+      page: page.value,
+      size: size.value
     })
-    rows.value = Array.isArray(data) ? data : []
+    rows.value = data?.records || []
+    total.value = data?.total || 0
   } finally {
     loading.value = false
   }
+}
+
+const changePage = (value: number) => {
+  page.value = value
+  load()
 }
 
 const loadStorage = async () => {
@@ -155,7 +168,7 @@ onMounted(async () => {
       </div>
       <div class="storage-item">
         <span>当前列表</span>
-        <b>{{ rows.length }} 个 · {{ sizeText(totalSize) }}</b>
+        <b>共 {{ total }} 个 · 本页 {{ sizeText(totalSize) }}</b>
       </div>
       <div class="storage-item">
         <span>单文件上限</span>
@@ -169,10 +182,10 @@ onMounted(async () => {
 
     <div class="panel">
       <div class="filter-bar">
-        <el-select v-model="filters.bizType" placeholder="全部业务" clearable style="width: 140px" @change="load">
+        <el-select v-model="filters.bizType" placeholder="全部业务" clearable style="width: 140px" @change="reload">
           <el-option v-for="item in bizOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
-        <el-select v-model="filters.storageType" placeholder="全部存储" clearable style="width: 130px" @change="load">
+        <el-select v-model="filters.storageType" placeholder="全部存储" clearable style="width: 130px" @change="reload">
           <el-option label="本地" value="LOCAL" />
           <el-option label="S3" value="S3" />
         </el-select>
@@ -181,7 +194,7 @@ onMounted(async () => {
           placeholder="文件名 / 台账号 / 单号 / 上传人"
           clearable
           style="width: 240px"
-          @keyup.enter="load"
+          @keyup.enter="reload"
         />
         <el-date-picker
           v-model="filters.range"
@@ -191,13 +204,21 @@ onMounted(async () => {
           end-placeholder="结束日期"
           style="width: 240px"
         />
-        <el-button type="primary" plain @click="load">查询</el-button>
+        <el-button type="primary" plain @click="reload">查询</el-button>
         <div class="spacer"></div>
         <TableToolbar :table="table" export-api="/files" export-name="文件台账" @applied="reload" />
       </div>
 
       <div class="table-wrap">
-        <DataTable :table="table" :data="rows" :loading="loading">
+        <DataTable
+          :table="table"
+          :data="rows"
+          :loading="loading"
+          :total="total"
+          :page="page"
+          :size="size"
+          @page-change="changePage"
+        >
           <template #cell-fileNo="{ row }"><span class="mono">{{ row.fileNo }}</span></template>
           <template #cell-fileName="{ row }">
             <el-button link type="primary" @click="download(row)">{{ row.originalName }}</el-button>

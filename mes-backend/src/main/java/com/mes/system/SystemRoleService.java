@@ -1,6 +1,7 @@
 package com.mes.system;
 
 import com.mes.common.BizException;
+import com.mes.common.PageResult;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -48,6 +49,34 @@ public class SystemRoleService {
             role.put("permissions", permissions.getOrDefault(id, List.of()));
         }
         return roles;
+    }
+
+    /** 角色列表分页；不传 page 时仍走 list() 返回全量 */
+    public PageResult page(int page, int size) {
+        int safePage = Math.max(1, page);
+        int safeSize = Math.max(1, Math.min(size, 200));
+        Long total = jdbcTemplate.queryForObject("select count(*) from sys_role", Long.class);
+        List<Map<String, Object>> roles = jdbcTemplate.queryForList("""
+                select r.id, r.code, r.name, r.description, r.data_scope as "dataScope", r.builtin,
+                       (select count(*) from sys_user u where u.role = r.code) as "userCount"
+                from sys_role r order by r.id limit ? offset ?
+                """, safeSize, (long) (safePage - 1) * safeSize);
+        if (!roles.isEmpty()) {
+            List<Long> ids = roles.stream().map(row -> ((Number) row.get("id")).longValue()).toList();
+            String marks = String.join(", ", java.util.Collections.nCopies(ids.size(), "?"));
+            Map<Long, List<String>> permissions = new LinkedHashMap<>();
+            jdbcTemplate.query("select role_id, permission from sys_role_permission where role_id in ("
+                    + marks + ") order by permission", rs -> {
+                long roleId = rs.getLong("role_id");
+                permissions.computeIfAbsent(roleId, key -> new ArrayList<>())
+                        .add(rs.getString("permission"));
+            }, ids.toArray());
+            for (Map<String, Object> role : roles) {
+                role.put("permissions", permissions.getOrDefault(
+                        ((Number) role.get("id")).longValue(), List.of()));
+            }
+        }
+        return new PageResult(roles, total == null ? 0 : total, safePage, safeSize);
     }
 
     @Transactional

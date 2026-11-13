@@ -29,13 +29,19 @@ public class WorkCenterController {
     @GetMapping
     public ApiResponse list(@RequestParam(required = false) String keyword,
                             @RequestParam(required = false) Long orgId,
-                            @RequestParam(required = false) Boolean enabled) {
+                            @RequestParam(required = false) Boolean enabled,
+                            @RequestParam(required = false) Integer page,
+                            @RequestParam(required = false) Integer size) {
+        if (page != null) {
+            return ApiResponse.ok(service.page(keyword, orgId, enabled, page, size == null ? 20 : size));
+        }
         return ApiResponse.ok(service.list(keyword, orgId, enabled));
     }
 
     @GetMapping("/options")
-    public ApiResponse options() {
-        return ApiResponse.ok(service.options());
+    public ApiResponse options(@RequestParam(required = false) String keyword,
+                               @RequestParam(required = false) Integer limit) {
+        return ApiResponse.ok(service.options(keyword, limit));
     }
 
     @PostMapping

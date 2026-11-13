@@ -529,8 +529,8 @@ onMounted(async () => {
 
     <div class="panel">
       <div class="filter-bar">
-        <el-input v-model="keyword" placeholder="订单号 / 客户名称" clearable style="width: 240px" @keyup.enter="load" />
-        <el-select v-model="status" placeholder="全部状态" clearable style="width: 140px" @change="load">
+        <el-input v-model="keyword" placeholder="订单号 / 客户名称" clearable style="width: 240px" @keyup.enter="reload" />
+        <el-select v-model="status" placeholder="全部状态" clearable style="width: 140px" @change="reload">
           <el-option label="草稿" value="DRAFT" />
           <el-option label="已确认" value="CONFIRMED" />
           <el-option label="生产中" value="IN_PRODUCTION" />
@@ -570,7 +570,7 @@ onMounted(async () => {
             :placeholder="`${activeCustomField.label}的值`"
             clearable
             style="width: 150px"
-            @change="load"
+            @change="reload"
           >
             <template v-if="activeCustomField.fieldType === 'SWITCH'">
               <el-option label="是" value="true" />
@@ -590,7 +590,7 @@ onMounted(async () => {
             value-format="YYYY-MM-DD"
             :placeholder="activeCustomField.label"
             style="width: 150px"
-            @change="load"
+            @change="reload"
           />
           <el-input
             v-else
@@ -598,10 +598,10 @@ onMounted(async () => {
             :placeholder="`${activeCustomField.label}的值`"
             clearable
             style="width: 150px"
-            @keyup.enter="load"
+            @keyup.enter="reload"
           />
         </template>
-        <el-button type="primary" plain @click="load">查询</el-button>
+        <el-button type="primary" plain @click="reload">查询</el-button>
         <div class="spacer"></div>
         <TableToolbar
           :table="table"

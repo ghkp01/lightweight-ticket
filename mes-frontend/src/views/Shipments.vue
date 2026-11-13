@@ -5,6 +5,7 @@ import { api, fmtQty } from '../api'
 import StatusTag from '../components/StatusTag.vue'
 import DataTable from '../components/DataTable.vue'
 import TableToolbar from '../components/TableToolbar.vue'
+import ReferenceSelect from '../components/ReferenceSelect.vue'
 import { useTableView } from '../composables/useTableView'
 
 const loading = ref(false)
@@ -14,7 +15,6 @@ const page = ref(1)
 const size = ref(20)
 const keyword = ref('')
 const status = ref('')
-const orders = ref<any[]>([])
 
 const createDialog = ref(false)
 const saving = ref(false)
@@ -72,14 +72,17 @@ const load = async () => {
 }
 
 const openCreate = async () => {
-  const data = await api.get('/sales-orders', { status: 'READY_TO_SHIP', page: 1, size: 100 })
-  orders.value = data.records
   Object.assign(form, { salesOrderId: null, carrier: '顺丰速运', trackingNo: '', address: '', items: [] })
   orderDetail.value = null
   createDialog.value = true
 }
 
 const onOrderChange = async (id: number) => {
+  if (!id) {
+    orderDetail.value = null
+    form.items = []
+    return
+  }
   const data = await api.get(`/sales-orders/${id}`)
   orderDetail.value = data
   form.address = data.address || ''
@@ -181,13 +184,13 @@ onMounted(async () => {
 
     <div class="panel">
       <div class="filter-bar">
-        <el-input v-model="keyword" placeholder="发货单 / 订单号 / 客户" clearable style="width: 250px" @keyup.enter="load" />
-        <el-select v-model="status" placeholder="全部状态" clearable style="width: 140px" @change="load">
+        <el-input v-model="keyword" placeholder="发货单 / 订单号 / 客户" clearable style="width: 250px" @keyup.enter="reload" />
+        <el-select v-model="status" placeholder="全部状态" clearable style="width: 140px" @change="reload">
           <el-option label="待发货" value="DRAFT" />
           <el-option label="已发货" value="SHIPPED" />
           <el-option label="已签收" value="SIGNED" />
         </el-select>
-        <el-button type="primary" plain @click="load">查询</el-button>
+        <el-button type="primary" plain @click="reload">查询</el-button>
         <div class="spacer"></div>
         <TableToolbar :table="table" export-api="/shipments" export-name="发货单" @applied="reload" />
         <span class="toolbar-tip">共 {{ total }} 张发货单</span>
@@ -222,14 +225,15 @@ onMounted(async () => {
       <el-form label-position="top">
         <div class="form-grid">
           <el-form-item label="销售订单" required class="full">
-            <el-select v-model="form.salesOrderId" filterable placeholder="仅显示待发货订单" style="width: 100%" @change="onOrderChange">
-              <el-option
-                v-for="item in orders"
-                :key="item.id"
-                :label="`${item.orderNo} · ${item.customerName}`"
-                :value="item.id"
-              />
-            </el-select>
+            <ReferenceSelect
+              v-model="form.salesOrderId"
+              url="/sales-orders/options"
+              :params="{ status: 'READY_TO_SHIP' }"
+              code-field="orderNo"
+              label-field="customerName"
+              placeholder="输入订单号或客户搜索（仅待发货）"
+              @select="(order) => onOrderChange(order ? order.id : null)"
+            />
           </el-form-item>
           <el-form-item label="承运商">
             <el-input v-model="form.carrier" />

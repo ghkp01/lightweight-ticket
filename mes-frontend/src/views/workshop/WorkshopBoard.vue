@@ -211,7 +211,7 @@ const load = async () => {
 const resize = () => chart?.resize()
 
 const loadWorkshops = async () => {
-  workshopOptions.value = await api.get('/orgs', { type: 'WORKSHOP' })
+  workshopOptions.value = await api.get('/orgs/options', { type: 'WORKSHOP', limit: 50 })
 }
 
 const changeScope = () => {
@@ -255,6 +255,7 @@ onUnmounted(() => {
         <el-select
           v-model="orgId"
           clearable
+          filterable
           placeholder="全厂"
           style="width: 150px"
           @change="changeScope"

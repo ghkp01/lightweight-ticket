@@ -1,5 +1,6 @@
 package com.mes.platform.audit;
 
+import com.mes.common.PageResult;
 import com.mes.security.CurrentUser;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -96,48 +97,75 @@ public class OperLogService {
                 entry.success(), clamp(entry.errorMsg(), 500), entry.durationMs());
     }
 
+    private static final String SELECT_SQL = """
+            select id, module, action, biz_type as "bizType", biz_id as "bizId", biz_no as "bizNo",
+                   summary, detail, operator, operator_role as "operatorRole", ip,
+                   user_agent as "userAgent", http_method as "httpMethod",
+                   request_path as "requestPath", success, error_msg as "errorMsg",
+                   duration_ms as "durationMs",
+                   to_char(created_at, 'YYYY-MM-DD HH24:MI:SS') as "createdAt"
+            from oper_log where 1 = 1
+            """;
+
     public List<Map<String, Object>> list(String module, String operator, String keyword,
                                           String success, String from, String to, Integer limit) {
-        StringBuilder sql = new StringBuilder("""
-                select id, module, action, biz_type as "bizType", biz_id as "bizId", biz_no as "bizNo",
-                       summary, detail, operator, operator_role as "operatorRole", ip,
-                       user_agent as "userAgent", http_method as "httpMethod",
-                       request_path as "requestPath", success, error_msg as "errorMsg",
-                       duration_ms as "durationMs",
-                       to_char(created_at, 'YYYY-MM-DD HH24:MI:SS') as "createdAt"
-                from oper_log where 1 = 1
-                """);
         List<Object> params = new ArrayList<>();
+        String where = where(module, operator, keyword, success, from, to, params);
+        int size = limit == null || limit <= 0 ? 200 : Math.min(limit, 1000);
+        return jdbcTemplate.queryForList(SELECT_SQL + where + " order by id desc limit " + size,
+                params.toArray());
+    }
+
+    /** 操作日志分页：日志只增不减，列表页改为后端分页 */
+    public PageResult page(String module, String operator, String keyword,
+                           String success, String from, String to, int page, int size) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 200);
+        List<Object> countParams = new ArrayList<>();
+        String countWhere = where(module, operator, keyword, success, from, to, countParams);
+        Long total = jdbcTemplate.queryForObject(
+                "select count(*) from oper_log where 1 = 1 " + countWhere, Long.class,
+                countParams.toArray());
+        List<Object> params = new ArrayList<>();
+        String pageWhere = where(module, operator, keyword, success, from, to, params);
+        params.add(safeSize);
+        params.add((safePage - 1) * safeSize);
+        List<Map<String, Object>> records = jdbcTemplate.queryForList(
+                SELECT_SQL + pageWhere + " order by id desc limit ? offset ?", params.toArray());
+        return new PageResult(records, total == null ? 0 : total, safePage, safeSize);
+    }
+
+    private String where(String module, String operator, String keyword, String success,
+                         String from, String to, List<Object> params) {
+        StringBuilder where = new StringBuilder();
         if (module != null && !module.isBlank()) {
-            sql.append(" and module = ?");
+            where.append(" and module = ?");
             params.add(module.trim());
         }
         if (operator != null && !operator.isBlank()) {
-            sql.append(" and (operator ilike ? or operator_role ilike ?)");
+            where.append(" and (operator ilike ? or operator_role ilike ?)");
             params.add("%" + operator.trim() + "%");
             params.add("%" + operator.trim() + "%");
         }
         if (keyword != null && !keyword.isBlank()) {
-            sql.append(" and (summary ilike ? or biz_no ilike ? or request_path ilike ?)");
+            where.append(" and (summary ilike ? or biz_no ilike ? or request_path ilike ?)");
             params.add("%" + keyword.trim() + "%");
             params.add("%" + keyword.trim() + "%");
             params.add("%" + keyword.trim() + "%");
         }
         if ("true".equalsIgnoreCase(success) || "false".equalsIgnoreCase(success)) {
-            sql.append(" and success = ?");
+            where.append(" and success = ?");
             params.add(Boolean.parseBoolean(success));
         }
         if (from != null && !from.isBlank()) {
-            sql.append(" and created_at >= cast(? as date)");
+            where.append(" and created_at >= cast(? as date)");
             params.add(from.trim());
         }
         if (to != null && !to.isBlank()) {
-            sql.append(" and created_at < cast(? as date) + 1");
+            where.append(" and created_at < cast(? as date) + 1");
             params.add(to.trim());
         }
-        int size = limit == null || limit <= 0 ? 200 : Math.min(limit, 1000);
-        sql.append(" order by id desc limit ").append(size);
-        return jdbcTemplate.queryForList(sql.toString(), params.toArray());
+        return where.toString();
     }
 
     public Map<String, Object> options() {

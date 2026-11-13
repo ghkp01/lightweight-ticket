@@ -32,6 +32,13 @@ public class InboundOrderController {
         return ApiResponse.ok(service.list(keyword, status, type, page, size));
     }
 
+    @GetMapping("/options")
+    public ApiResponse options(@RequestParam(required = false) String keyword,
+                               @RequestParam(required = false) String status,
+                               @RequestParam(defaultValue = "20") int limit) {
+        return ApiResponse.ok(service.options(keyword, status, limit));
+    }
+
     @GetMapping("/summary")
     public ApiResponse summary() {
         return ApiResponse.ok(service.summary());

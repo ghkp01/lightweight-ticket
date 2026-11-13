@@ -235,16 +235,42 @@ const submit = async () => {
 const submitDialog = ref(false)
 const submitTarget = reactive<any>({ id: 0, quoteNo: '' })
 const reviewerOptions = ref<any[]>([])
+const reviewerLoading = ref(false)
+const reviewerCache = ref(new Map<number, any>())
 const selectedReviewers = ref<number[]>([])
 const submitting = ref(false)
+
+const searchReviewers = async (keyword = '') => {
+  reviewerLoading.value = true
+  try {
+    const rows = await api.get('/sales-quotes/reviewers', {
+      keyword: keyword || undefined,
+      limit: 20
+    })
+    const merged = [...(rows || [])]
+    for (const item of reviewerCache.value.values()) {
+      if (!merged.some((row: any) => row.id === item.id)) merged.push(item)
+    }
+    reviewerOptions.value = merged
+  } finally {
+    reviewerLoading.value = false
+  }
+}
+
+/** 记住已选评审人，远程换关键字后标签不丢 */
+const rememberReviewers = () => {
+  const ids = [addForm.reviewerId, transferForm.toId, ...selectedReviewers.value].filter(Boolean)
+  for (const id of ids) {
+    const found = reviewerOptions.value.find((item: any) => item.id === id)
+    if (found) reviewerCache.value.set(Number(id), found)
+  }
+}
 
 const openSubmit = async (row: any) => {
   submitTarget.id = row.id
   submitTarget.quoteNo = row.quoteNo
   selectedReviewers.value = []
-  if (!reviewerOptions.value.length) {
-    reviewerOptions.value = await api.get('/sales-quotes/reviewers')
-  }
+  await searchReviewers('')
   submitDialog.value = true
 }
 
@@ -348,9 +374,7 @@ const refreshDetail = async () => {
 }
 
 const ensureReviewers = async () => {
-  if (!reviewerOptions.value.length) {
-    reviewerOptions.value = await api.get('/sales-quotes/reviewers')
-  }
+  await searchReviewers('')
 }
 
 const availableReviewers = computed(() => {
@@ -691,7 +715,17 @@ onMounted(async () => {
           <span class="mono">{{ submitTarget.quoteNo }}</span>
         </el-form-item>
         <el-form-item label="评审人" required>
-          <el-select v-model="selectedReviewers" multiple filterable style="width: 100%" placeholder="至少选择一名评审人">
+          <el-select
+            v-model="selectedReviewers"
+            multiple
+            filterable
+            remote
+            :remote-method="searchReviewers"
+            :loading="reviewerLoading"
+            style="width: 100%"
+            placeholder="至少选择一名评审人"
+            @change="rememberReviewers"
+          >
             <el-option
               v-for="item in reviewerOptions"
               :key="item.id"
@@ -713,7 +747,16 @@ onMounted(async () => {
     <el-dialog v-model="addDialog" title="加签评审人" width="460px" append-to-body>
       <el-form label-position="top">
         <el-form-item label="追加评审人" required>
-          <el-select v-model="addForm.reviewerId" filterable style="width: 100%" placeholder="选择评审人">
+          <el-select
+            v-model="addForm.reviewerId"
+            filterable
+            remote
+            :remote-method="searchReviewers"
+            :loading="reviewerLoading"
+            style="width: 100%"
+            placeholder="选择评审人"
+            @change="rememberReviewers"
+          >
             <el-option
               v-for="item in availableReviewers"
               :key="item.id"
@@ -735,7 +778,16 @@ onMounted(async () => {
           <span>{{ transferForm.fromName }}</span>
         </el-form-item>
         <el-form-item label="转给" required>
-          <el-select v-model="transferForm.toId" filterable style="width: 100%" placeholder="选择评审人">
+          <el-select
+            v-model="transferForm.toId"
+            filterable
+            remote
+            :remote-method="searchReviewers"
+            :loading="reviewerLoading"
+            style="width: 100%"
+            placeholder="选择评审人"
+            @change="rememberReviewers"
+          >
             <el-option
               v-for="item in availableReviewers"
               :key="item.id"

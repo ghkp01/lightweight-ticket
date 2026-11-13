@@ -27,7 +27,12 @@ public class TaskController {
     /** 我的任务：点名给我的 + 我所在角色池里没人认领的 */
     @GetMapping("/my")
     public ApiResponse my(@RequestParam(required = false) String status,
-                          @RequestParam(required = false) String type) {
+                          @RequestParam(required = false) String type,
+                          @RequestParam(required = false) Integer page,
+                          @RequestParam(defaultValue = "20") int size) {
+        if (page != null) {
+            return ApiResponse.ok(service.minePage(CurrentUser.name(), status, type, page, size));
+        }
         return ApiResponse.ok(service.mine(CurrentUser.name(), status, type));
     }
 
@@ -36,7 +41,12 @@ public class TaskController {
     @PreAuthorize("hasAnyRole('ADMIN', 'PLANNER')")
     public ApiResponse all(@RequestParam(required = false) String status,
                            @RequestParam(required = false) String type,
-                           @RequestParam(required = false) String keyword) {
+                           @RequestParam(required = false) String keyword,
+                           @RequestParam(required = false) Integer page,
+                           @RequestParam(defaultValue = "20") int size) {
+        if (page != null) {
+            return ApiResponse.ok(service.allPage(status, type, keyword, page, size));
+        }
         return ApiResponse.ok(service.all(status, type, keyword));
     }
 

@@ -27,7 +27,12 @@ public class DefectController {
     @GetMapping
     public ApiResponse list(@RequestParam(required = false) String status,
                             @RequestParam(required = false) String keyword,
-                            @RequestParam(defaultValue = "100") int limit) {
+                            @RequestParam(defaultValue = "100") int limit,
+                            @RequestParam(required = false) Integer page,
+                            @RequestParam(defaultValue = "20") int size) {
+        if (page != null) {
+            return ApiResponse.ok(service.page(status, keyword, page, size));
+        }
         return ApiResponse.ok(service.list(status, keyword, limit));
     }
 

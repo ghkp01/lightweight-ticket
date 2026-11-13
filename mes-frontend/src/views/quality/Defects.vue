@@ -14,6 +14,7 @@ const status = ref('PENDING')
 const keyword = ref('')
 const page = ref(1)
 const size = ref(20)
+const total = ref(0)
 const route = useRoute()
 const summary = ref<any>({
   pending: 0,
@@ -102,15 +103,26 @@ const dispositionOptions = [
 const load = async () => {
   loading.value = true
   try {
-    const [list, sum] = await Promise.all([
-      api.get('/defects', { status: status.value, keyword: keyword.value, limit: 200 }),
+    const [data, sum] = await Promise.all([
+      api.get('/defects', {
+        status: status.value,
+        keyword: keyword.value,
+        page: page.value,
+        size: size.value
+      }),
       api.get('/defects/summary')
     ])
-    rows.value = list
+    rows.value = data?.records || []
+    total.value = data?.total || 0
     summary.value = sum
   } finally {
     loading.value = false
   }
+}
+
+const changePage = (value: number) => {
+  page.value = value
+  load()
 }
 
 const sourceOf = (value: any) =>
@@ -214,20 +226,28 @@ onMounted(async () => {
           placeholder="不良单号 / 工单号 / 产品"
           clearable
           style="width: 240px"
-          @keyup.enter="load"
+          @keyup.enter="reload"
         />
-        <el-select v-model="status" placeholder="全部状态" clearable style="width: 140px" @change="load">
+        <el-select v-model="status" placeholder="全部状态" clearable style="width: 140px" @change="reload">
           <el-option label="待处置" value="PENDING" />
           <el-option label="已处置" value="DISPOSED" />
         </el-select>
-        <el-button type="primary" plain @click="load">查询</el-button>
+        <el-button type="primary" plain @click="reload">查询</el-button>
         <div class="spacer"></div>
         <TableToolbar :table="table" export-api="/defects" export-name="不良台账" @applied="reload" />
-        <span class="toolbar-tip">共 {{ rows.length }} 条不良记录</span>
+        <span class="toolbar-tip">共 {{ total }} 条不良记录</span>
       </div>
 
       <div class="table-wrap">
-        <DataTable :table="table" :data="rows" :loading="loading">
+        <DataTable
+          :table="table"
+          :data="rows"
+          :loading="loading"
+          :total="total"
+          :page="page"
+          :size="size"
+          @page-change="changePage"
+        >
           <template #cell-defectNo="{ row }"><span class="mono">{{ row.defectNo }}</span></template>
           <template #cell-source="{ row }">
             <span class="status-tag" :class="sourceOf(row.source).cls">

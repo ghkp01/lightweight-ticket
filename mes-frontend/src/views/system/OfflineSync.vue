@@ -1,33 +1,43 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { api } from '../../api'
 
 const loading = ref(false)
 const rows = ref<any[]>([])
 const status = ref<any>({})
 const keyword = ref('')
+const page = ref(1)
+const size = ref(20)
+const total = ref(0)
 
 const load = async () => {
   loading.value = true
   try {
-    const [list, info] = await Promise.all([
-      api.get('/offline/recent', { limit: 200 }),
+    const [data, info] = await Promise.all([
+      api.get('/offline/recent', {
+        keyword: keyword.value.trim() || undefined,
+        page: page.value,
+        size: size.value
+      }),
       api.get('/offline/status')
     ])
-    rows.value = list || []
+    rows.value = data?.records || []
+    total.value = data?.total || 0
     status.value = info || {}
   } finally {
     loading.value = false
   }
 }
 
-const filtered = computed(() => {
-  const kw = keyword.value.trim().toUpperCase()
-  if (!kw) return rows.value
-  return rows.value.filter((row) =>
-    [row.key, row.userName, row.path].some((cell) => String(cell || '').toUpperCase().includes(kw))
-  )
-})
+const reload = () => {
+  page.value = 1
+  load()
+}
+
+const changePage = (value: number) => {
+  page.value = value
+  load()
+}
 
 const pathText = (value: any) => String(value || '').replace('/api', '')
 
@@ -49,6 +59,8 @@ onMounted(load)
           placeholder="按幂等键 / 账号 / 路径搜"
           clearable
           style="width: 240px"
+          @keyup.enter="reload"
+          @clear="reload"
         />
         <el-button :loading="loading" @click="load">刷新</el-button>
       </div>
@@ -75,7 +87,7 @@ onMounted(load)
 
     <div class="panel">
       <div class="table-wrap">
-        <el-table v-loading="loading" :data="filtered" size="small" empty-text="还没有重传记录">
+        <el-table v-loading="loading" :data="rows" size="small" empty-text="还没有重传记录">
           <el-table-column prop="createdAt" label="首次执行时间" width="175">
             <template #default="{ row }"><span class="mono">{{ row.createdAt }}</span></template>
           </el-table-column>
@@ -92,6 +104,19 @@ onMounted(load)
           </el-table-column>
         </el-table>
       </div>
+
+      <div class="pager">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="size"
+          :total="total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next"
+          @current-change="changePage"
+          @size-change="load"
+        />
+      </div>
+
       <p class="tip">
         同一个幂等键只会真正执行一次，重复到达直接返回首次结果；超过保留天数的记录由「离线重传记录清理」任务删除。
       </p>

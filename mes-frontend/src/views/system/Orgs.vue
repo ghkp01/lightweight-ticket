@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, nextCode } from '../../api'
+import ReferenceSelect from '../../components/ReferenceSelect.vue'
 
 type OrgNode = {
   id: number
@@ -99,7 +100,10 @@ const loadTree = async () => {
 const selectedId = ref<number | null>(null)
 const detail = ref<any>(null)
 const detailLoading = ref(false)
-const members = computed<any[]>(() => detail.value?.members || [])
+const memberRows = ref<any[]>([])
+const memberTotal = ref(0)
+const memberPage = ref(1)
+const memberSize = ref(20)
 
 const parentLabel = (row: any) => {
   if (!row) return '-'
@@ -119,10 +123,38 @@ const loadDetail = async (id: number) => {
   }
 }
 
+const loadMembers = async (id: number) => {
+  try {
+    const data = await api.get(`/orgs/${id}/members`, {
+      page: memberPage.value,
+      size: memberSize.value
+    })
+    if (selectedId.value !== id) return
+    memberRows.value = data?.records || []
+    memberTotal.value = data?.total || 0
+  } catch {
+    if (selectedId.value === id) {
+      memberRows.value = []
+      memberTotal.value = 0
+    }
+  }
+}
+
+const changeMemberPage = (value: number) => {
+  memberPage.value = value
+  if (selectedId.value) loadMembers(selectedId.value)
+}
+
+const changeMemberSize = () => {
+  memberPage.value = 1
+  if (selectedId.value) loadMembers(selectedId.value)
+}
+
 const selectOrg = async (id: number) => {
   selectedId.value = id
   treeRef.value?.setCurrentKey(id)
-  await loadDetail(id)
+  memberPage.value = 1
+  await Promise.all([loadDetail(id), loadMembers(id)])
 }
 
 const onNodeClick = (data: OrgNode) => {
@@ -329,14 +361,17 @@ const removeOrg = async () => {
 
 const wcLoading = ref(false)
 const wcRows = ref<any[]>([])
+const wcTotal = ref(0)
+const wcPage = ref(1)
+const wcSize = ref(20)
 const wcDialog = ref(false)
 const editingWcId = ref<number | null>(null)
 const wcSaving = ref(false)
-const orgOptions = ref<any[]>([])
 const wcForm = reactive<any>({
   code: '',
   name: '',
   orgId: null,
+  orgName: '',
   type: 'MACHINE',
   dailyCapacityMinutes: 480,
   enabled: true,
@@ -346,27 +381,37 @@ const wcForm = reactive<any>({
 const loadWorkCenters = async () => {
   wcLoading.value = true
   try {
-    const data = await api.get('/work-centers')
-    wcRows.value = Array.isArray(data) ? data : []
+    const data = await api.get('/work-centers', {
+      page: wcPage.value,
+      size: wcSize.value
+    })
+    wcRows.value = data?.records || []
+    wcTotal.value = data?.total || 0
   } catch {
     wcRows.value = []
+    wcTotal.value = 0
   } finally {
     wcLoading.value = false
   }
 }
 
-const loadOrgOptions = async () => {
-  try {
-    const data = await api.get('/orgs/options')
-    orgOptions.value = Array.isArray(data) ? data : []
-  } catch {
-    orgOptions.value = []
-  }
+const changeWcPage = (value: number) => {
+  wcPage.value = value
+  loadWorkCenters()
 }
 
-const orgOptionLabel = (item: any) => {
-  const level = Number(item?.level || 1)
-  return `${'　'.repeat(Math.max(0, level - 1))}${item?.name || ''}`
+const changeWcSize = () => {
+  wcPage.value = 1
+  loadWorkCenters()
+}
+
+/** 删除后刷新：当前页空了就回上一页 */
+const refreshWorkCenters = async () => {
+  await loadWorkCenters()
+  if (!wcRows.value.length && wcPage.value > 1) {
+    wcPage.value -= 1
+    await loadWorkCenters()
+  }
 }
 
 const openCreateWc = async () => {
@@ -375,12 +420,12 @@ const openCreateWc = async () => {
     code: '',
     name: '',
     orgId: null,
+    orgName: '',
     type: 'MACHINE',
     dailyCapacityMinutes: 480,
     enabled: true,
     remark: ''
   })
-  await loadOrgOptions()
   try {
     wcForm.code = await nextCode('WC')
   } catch {
@@ -395,12 +440,12 @@ const openEditWc = async (row: any) => {
     code: row.code,
     name: row.name,
     orgId: row.orgId ?? null,
+    orgName: row.orgName || '',
     type: row.type || 'MACHINE',
     dailyCapacityMinutes: row.dailyCapacityMinutes ?? 480,
     enabled: row.enabled !== false,
     remark: row.remark || ''
   })
-  await loadOrgOptions()
   wcDialog.value = true
 }
 
@@ -454,7 +499,7 @@ const removeWc = async (row: any) => {
     return
   }
   ElMessage.success('工作中心已删除')
-  loadWorkCenters()
+  refreshWorkCenters()
 }
 
 const onTabChange = (name: any) => {
@@ -686,7 +731,7 @@ onMounted(async () => {
                   </div>
                   <div class="detail-item">
                     <div class="label">成员数</div>
-                    <div class="value num">{{ detail.memberCount ?? members.length }}</div>
+                    <div class="value num">{{ detail.memberCount ?? memberTotal }}</div>
                   </div>
                   <div class="detail-item">
                     <div class="label">排序</div>
@@ -700,10 +745,10 @@ onMounted(async () => {
 
                 <div class="members-head">
                   <h4>组织成员</h4>
-                  <span class="toolbar-tip">共 {{ detail.memberCount ?? members.length }} 人，仅显示本组织直属成员</span>
+                  <span class="toolbar-tip">共 {{ detail.memberCount ?? memberTotal }} 人，仅显示本组织直属成员</span>
                 </div>
 
-                <el-table :data="members" stripe empty-text="该组织暂无成员" max-height="340">
+                <el-table :data="memberRows" stripe empty-text="该组织暂无成员" max-height="340">
                   <el-table-column prop="realName" label="姓名" width="100">
                     <template #default="{ row }">{{ row.realName || '-' }}</template>
                   </el-table-column>
@@ -732,6 +777,17 @@ onMounted(async () => {
                     </template>
                   </el-table-column>
                 </el-table>
+                <div class="pager">
+                  <el-pagination
+                    v-model:current-page="memberPage"
+                    v-model:page-size="memberSize"
+                    :total="memberTotal"
+                    :page-sizes="[10, 20, 50, 100]"
+                    layout="total, sizes, prev, pager, next"
+                    @current-change="changeMemberPage"
+                    @size-change="changeMemberSize"
+                  />
+                </div>
               </template>
               <el-empty v-else description="请选择左侧组织查看详情" :image-size="80" />
             </div>
@@ -742,7 +798,7 @@ onMounted(async () => {
           <div class="tab-toolbar">
             <el-button v-perm="'workcenter:save'" type="primary" @click="openCreateWc">新建工作中心</el-button>
             <div class="spacer"></div>
-            <span class="toolbar-tip">共 {{ wcRows.length }} 个工作中心</span>
+            <span class="toolbar-tip">共 {{ wcTotal }} 个工作中心</span>
           </div>
 
           <div class="wc-table-wrap">
@@ -798,6 +854,17 @@ onMounted(async () => {
                 </template>
               </el-table-column>
             </el-table>
+          </div>
+          <div class="pager">
+            <el-pagination
+              v-model:current-page="wcPage"
+              v-model:page-size="wcSize"
+              :total="wcTotal"
+              :page-sizes="[10, 20, 50, 100]"
+              layout="total, sizes, prev, pager, next"
+              @current-change="changeWcPage"
+              @size-change="changeWcSize"
+            />
           </div>
 
           <div class="wc-note">
@@ -883,14 +950,14 @@ onMounted(async () => {
             <el-input v-model="wcForm.name" maxlength="64" placeholder="如 下料中心" />
           </el-form-item>
           <el-form-item label="所属组织" class="full">
-            <el-select v-model="wcForm.orgId" clearable filterable placeholder="请选择所属组织" style="width: 100%">
-              <el-option
-                v-for="item in orgOptions"
-                :key="item.id"
-                :label="orgOptionLabel(item)"
-                :value="item.id"
-              />
-            </el-select>
+            <ReferenceSelect
+              v-model="wcForm.orgId"
+              url="/orgs/options"
+              :initial-label="wcForm.orgName"
+              clearable
+              placeholder="输入组织编码或名称搜索"
+              @select="(item) => wcForm.orgName = item ? item.name : ''"
+            />
           </el-form-item>
           <el-form-item label="类型">
             <el-select v-model="wcForm.type" style="width: 100%">

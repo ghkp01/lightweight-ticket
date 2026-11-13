@@ -2,6 +2,7 @@ package com.mes.warehouse;
 
 import com.mes.common.BizException;
 import com.mes.common.CodeGenerator;
+import com.mes.common.PageResult;
 import com.mes.inventory.api.InventoryPort;
 import com.mes.masterdata.api.MasterDataPort;
 import com.mes.masterdata.api.MasterDataViews;
@@ -55,6 +56,39 @@ public class LocationService implements LocationPort {
     public List<Map<String, Object>> list(Long warehouseId, String keyword) {
         StringBuilder where = new StringBuilder(" where 1 = 1 ");
         List<Object> args = new ArrayList<>();
+        appendFilters(where, args, warehouseId, keyword);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                select l.id, l.warehouse_id as "warehouseId",
+                       l.code, l.name, l.zone, l.enabled, l.remark
+                from warehouse_location l
+                """ + where + " order by l.warehouse_id, l.code", args.toArray());
+        fillLocationUsage(rows);
+        return rows;
+    }
+
+    /** 库位台账分页；不传 page 时仍走 list 返回全量，兼容内部调用 */
+    public PageResult page(Long warehouseId, String keyword, int page, int size) {
+        int safePage = Math.max(1, page);
+        int safeSize = Math.max(1, Math.min(size, 200));
+        StringBuilder where = new StringBuilder(" where 1 = 1 ");
+        List<Object> args = new ArrayList<>();
+        appendFilters(where, args, warehouseId, keyword);
+        Long total = jdbcTemplate.queryForObject(
+                "select count(*) from warehouse_location l" + where, Long.class, args.toArray());
+        List<Object> pageArgs = new ArrayList<>(args);
+        pageArgs.add(safeSize);
+        pageArgs.add((long) (safePage - 1) * safeSize);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                select l.id, l.warehouse_id as "warehouseId",
+                       l.code, l.name, l.zone, l.enabled, l.remark
+                from warehouse_location l
+                """ + where + " order by l.warehouse_id, l.code limit ? offset ?", pageArgs.toArray());
+        fillLocationUsage(rows);
+        return new PageResult(rows, total == null ? 0 : total, safePage, safeSize);
+    }
+
+    private static void appendFilters(StringBuilder where, List<Object> args,
+                                      Long warehouseId, String keyword) {
         if (warehouseId != null) {
             where.append(" and l.warehouse_id = ? ");
             args.add(warehouseId);
@@ -66,12 +100,10 @@ public class LocationService implements LocationPort {
             args.add(like);
             args.add(like);
         }
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
-                select l.id, l.warehouse_id as "warehouseId",
-                       l.code, l.name, l.zone, l.enabled, l.remark
-                from warehouse_location l
-                """ + where + " order by l.warehouse_id, l.code", args.toArray());
-        // 批次数与占用量在库存那边，按库位批量问一次
+    }
+
+    /** 批次数与占用量在库存那边，按库位批量问一次 */
+    private void fillLocationUsage(List<Map<String, Object>> rows) {
         Map<Long, InventoryPort.LocationOccupancy> occupancy = inventory.locationOccupancy(
                 rows.stream().map(row -> ((Number) row.get("id")).longValue()).toList());
         for (Map<String, Object> row : rows) {
@@ -81,7 +113,6 @@ public class LocationService implements LocationPort {
             row.put("stockQty", usage == null ? BigDecimal.ZERO : usage.stockQty());
         }
         MasterDataViews.fillWarehouseNames(masterData, rows, "warehouseId", "warehouseName");
-        return rows;
     }
 
     /**
@@ -149,22 +180,38 @@ public class LocationService implements LocationPort {
         jdbcTemplate.update("delete from warehouse_location where id = ?", id);
     }
 
-    /** 按仓库列出可用库位，供入库下拉 */
+    /** 按仓库列出可用库位，供入库下拉；keyword 与 limit 供远程搜索使用 */
     public List<Map<String, Object>> options(Long warehouseId) {
-        if (warehouseId == null) {
-            List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
-                    select l.id, l.code, l.name, l.warehouse_id as "warehouseId"
-                    from warehouse_location l
-                    where l.enabled order by l.warehouse_id, l.code
-                    """);
-            MasterDataViews.fillWarehouseNames(masterData, rows, "warehouseId", "warehouseName");
-            return rows;
-        }
-        return jdbcTemplate.queryForList("""
+        return options(warehouseId, null, null);
+    }
+
+    public List<Map<String, Object>> options(Long warehouseId, String keyword, Integer limit) {
+        String like = "%" + (keyword == null ? "" : keyword.trim()) + "%";
+        List<Object> args = new ArrayList<>();
+        StringBuilder sql = new StringBuilder("""
                 select l.id, l.code, l.name, l.warehouse_id as "warehouseId"
                 from warehouse_location l
-                where l.enabled and l.warehouse_id = ? order by l.code
-                """, warehouseId);
+                where l.enabled
+                """);
+        if (warehouseId != null) {
+            sql.append(" and l.warehouse_id = ? ");
+            args.add(warehouseId);
+        }
+        if (keyword != null && !keyword.isBlank()) {
+            sql.append(" and (l.code ilike ? or l.name ilike ?) ");
+            args.add(like);
+            args.add(like);
+        }
+        sql.append(" order by l.warehouse_id, l.code");
+        if (limit != null) {
+            sql.append(" limit ?");
+            args.add(Math.max(1, Math.min(limit, 100)));
+        }
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql.toString(), args.toArray());
+        if (warehouseId == null) {
+            MasterDataViews.fillWarehouseNames(masterData, rows, "warehouseId", "warehouseName");
+        }
+        return rows;
     }
 
     /** 入库上架：按批次把货位记到批次上，库位可空 */
@@ -208,6 +255,16 @@ public class LocationService implements LocationPort {
         MasterDataViews.fillProductNames(masterData, rows);
         MasterDataViews.fillWarehouseNames(masterData, rows, "warehouseId", "warehouseName");
         return rows;
+    }
+
+    /** 批次分布分页：按现有口径取全量并补名称、排序后再切片，保证展示顺序与原来一致 */
+    public PageResult batchLocationsPage(Long warehouseId, String keyword, int page, int size) {
+        int safePage = Math.max(1, page);
+        int safeSize = Math.max(1, Math.min(size, 200));
+        List<Map<String, Object>> rows = batchLocations(warehouseId, keyword);
+        int from = Math.min((safePage - 1) * safeSize, rows.size());
+        int to = Math.min(from + safeSize, rows.size());
+        return new PageResult(new ArrayList<>(rows.subList(from, to)), rows.size(), safePage, safeSize);
     }
 
     /** 补库位编码与名称：库位表是本模块自己的，一次查完 */
@@ -315,6 +372,35 @@ public class LocationService implements LocationPort {
         MasterDataViews.fillProductNames(masterData, rows);
         MasterDataViews.fillWarehouseNames(masterData, rows, "warehouseId", "warehouseName");
         return rows;
+    }
+
+    /** 移库记录分页；不传 page 时仍走 moves(warehouseId, limit) */
+    public PageResult movesPage(Long warehouseId, int page, int size) {
+        int safePage = Math.max(1, page);
+        int safeSize = Math.max(1, Math.min(size, 200));
+        String where = warehouseId == null ? "" : " where m.warehouse_id = ? ";
+        Object[] countArgs = warehouseId == null ? new Object[]{} : new Object[]{warehouseId};
+        Long total = jdbcTemplate.queryForObject(
+                "select count(*) from stock_move m" + where, Long.class, countArgs);
+        List<Object> args = new ArrayList<>();
+        if (warehouseId != null) {
+            args.add(warehouseId);
+        }
+        args.add(safeSize);
+        args.add((long) (safePage - 1) * safeSize);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                select m.id, m.move_no as "moveNo", m.product_id as "productId",
+                       m.warehouse_id as "warehouseId", m.batch_no as "batchNo", m.qty,
+                       fl.code as "fromLocation", tl.code as "toLocation",
+                       m.operator, m.remark,
+                       to_char(m.created_at, 'YYYY-MM-DD HH24:MI') as "createdAt"
+                from stock_move m
+                left join warehouse_location fl on fl.id = m.from_location_id
+                join warehouse_location tl on tl.id = m.to_location_id
+                """ + where + " order by m.id desc limit ? offset ?", args.toArray());
+        MasterDataViews.fillProductNames(masterData, rows);
+        MasterDataViews.fillWarehouseNames(masterData, rows, "warehouseId", "warehouseName");
+        return new PageResult(rows, total == null ? 0 : total, safePage, safeSize);
     }
 
     private Long findLocation(long warehouseId, String code) {

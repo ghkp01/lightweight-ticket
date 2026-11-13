@@ -25,14 +25,21 @@ public class WorkOrderOperationReader implements WorkOrderOperationPort {
     }
 
     @Override
-    public Map<Long, Integer> operationCountByProcess() {
+    public Map<Long, Integer> operationCounts(Collection<Long> processIds) {
+        List<Long> ids = processIds == null ? List.of()
+                : processIds.stream().filter(java.util.Objects::nonNull).distinct().toList();
         Map<Long, Integer> map = new LinkedHashMap<>();
+        if (ids.isEmpty()) {
+            return map;
+        }
+        String marks = String.join(", ", java.util.Collections.nCopies(ids.size(), "?"));
         for (Map<String, Object> row : jdbcTemplate.queryForList("""
                 select process_id as "processId", count(*) as "operationCount"
                 from work_order_operation
-                where process_id is not null
+                where process_id in (""" + marks + """
+                )
                 group by process_id
-                """)) {
+                """, ids.toArray())) {
             map.put(((Number) row.get("processId")).longValue(),
                     ((Number) row.get("operationCount")).intValue());
         }

@@ -1,6 +1,7 @@
 package com.mes.org;
 
 import com.mes.common.BizException;
+import com.mes.common.PageResult;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -220,12 +221,62 @@ public class OrgService {
         return jdbcTemplate.queryForList(sql, arg);
     }
 
+    /** 组织成员分页；不传 page 时仍走 members(orgId, includeChildren) 返回全量 */
+    public PageResult membersPage(long orgId, boolean includeChildren, int page, int size) {
+        Map<String, Object> org = load(orgId);
+        String path = String.valueOf(org.get("path"));
+        int safePage = Math.max(1, page);
+        int safeSize = Math.max(1, Math.min(size, 200));
+        String where = includeChildren
+                ? " where u.org_id in (select id from sys_org where path like ?) "
+                : " where u.org_id = ? ";
+        Object arg = includeChildren ? path + "%" : orgId;
+        Long total = jdbcTemplate.queryForObject(
+                "select count(*) from sys_user u" + where, Long.class, arg);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                select u.id, u.username, u.real_name as "realName", u.phone, u.employee_no as "employeeNo",
+                       u.position, u.role, coalesce(r.name, u.role) as "roleName", u.enabled,
+                       o.name as "orgName", o.path as "orgPath"
+                from sys_user u
+                left join sys_role r on r.code = u.role
+                left join sys_org o on o.id = u.org_id
+                """ + where + " order by u.org_id, u.id limit ? offset ?",
+                arg, safeSize, (long) (safePage - 1) * safeSize);
+        return new PageResult(rows, total == null ? 0 : total, safePage, safeSize);
+    }
+
     /** 下拉选项：扁平列表，带层级缩进用的 level 与 path */
     public List<Map<String, Object>> options() {
-        return jdbcTemplate.queryForList("""
+        return options(null, null, null);
+    }
+
+    public List<Map<String, Object>> options(String keyword, Integer limit) {
+        return options(keyword, null, limit);
+    }
+
+    /** 引用选择专用：关键字 + 组织类型过滤 + 条数上限；limit 为空时保持原行为（返回全部启用组织） */
+    public List<Map<String, Object>> options(String keyword, String type, Integer limit) {
+        StringBuilder sql = new StringBuilder("""
                 select id, parent_id as "parentId", code, name, type, path, level, enabled
-                from sys_org where enabled = true order by level, sort, id
+                from sys_org where enabled = true
                 """);
+        List<Object> args = new ArrayList<>();
+        if (keyword != null && !keyword.isBlank()) {
+            sql.append(" and (code ilike ? or name ilike ?) ");
+            String like = "%" + keyword.trim() + "%";
+            args.add(like);
+            args.add(like);
+        }
+        if (type != null && !type.isBlank()) {
+            sql.append(" and type = ? ");
+            args.add(type.trim().toUpperCase(Locale.ROOT));
+        }
+        sql.append(" order by level, sort, id ");
+        if (limit != null && limit > 0) {
+            sql.append(" limit ? ");
+            args.add(Math.min(limit, 50));
+        }
+        return jdbcTemplate.queryForList(sql.toString(), args.toArray());
     }
 
     public Map<String, Object> load(long id) {

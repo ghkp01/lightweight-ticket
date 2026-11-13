@@ -199,7 +199,25 @@ public class QuotationService implements QuotationPort {
 
     /** 可担任评审的账号：以 quotation:review 权限为准 */
     public List<UserDirectoryPort.UserRef> reviewers() {
-        return users.byPermission("quotation:review");
+        return reviewers(null, null);
+    }
+
+    /** 引用选择专用：关键字过滤 + 条数上限；limit 为空时保持原行为（返回全部可评审人员） */
+    public List<UserDirectoryPort.UserRef> reviewers(String keyword, Integer limit) {
+        List<UserDirectoryPort.UserRef> all = users.byPermission("quotation:review");
+        String kw = keyword == null ? "" : keyword.trim().toLowerCase(java.util.Locale.ROOT);
+        List<UserDirectoryPort.UserRef> filtered = kw.isEmpty() ? all : all.stream()
+                .filter(user -> contains(user.realName(), kw) || contains(user.username(), kw))
+                .toList();
+        if (limit != null && limit > 0) {
+            int size = Math.min(Math.min(limit, 50), filtered.size());
+            return new ArrayList<>(filtered.subList(0, size));
+        }
+        return filtered;
+    }
+
+    private static boolean contains(String value, String keyword) {
+        return value != null && value.toLowerCase(java.util.Locale.ROOT).contains(keyword);
     }
 
     @Override

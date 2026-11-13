@@ -44,8 +44,18 @@ public class GeneralLedgerController {
     }
 
     @GetMapping("/accounts")
-    public ApiResponse accounts() {
+    public ApiResponse accounts(@RequestParam(required = false) Integer page,
+                                @RequestParam(defaultValue = "20") int size) {
+        if (page != null) {
+            return ApiResponse.ok(ledgerService.accountPage(page, size));
+        }
         return ApiResponse.ok(ledgerService.accounts());
+    }
+
+    @GetMapping("/accounts/options")
+    public ApiResponse accountOptions(@RequestParam(required = false) String keyword,
+                                     @RequestParam(defaultValue = "20") int limit) {
+        return ApiResponse.ok(ledgerService.accounts(keyword, limit));
     }
 
     @GetMapping("/periods")

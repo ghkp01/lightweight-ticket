@@ -2,6 +2,7 @@ package com.mes.system;
 
 import com.mes.common.BizException;
 import com.mes.common.CodeGenerator;
+import com.mes.common.PageResult;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -50,6 +51,27 @@ public class CodeRuleService {
                 from sys_code_rule
                 order by id
                 """);
+        fillSamples(rules);
+        return rules;
+    }
+
+    /** 编码规则列表分页；不传 page 时仍走 list() 返回全量 */
+    public PageResult page(int page, int size) {
+        int safePage = Math.max(1, page);
+        int safeSize = Math.max(1, Math.min(size, 200));
+        Long total = jdbcTemplate.queryForObject("select count(*) from sys_code_rule", Long.class);
+        List<Map<String, Object>> rules = jdbcTemplate.queryForList("""
+                select id, biz_type as "bizType", biz_name as "bizName", prefix,
+                       date_pattern as "datePattern", separator, seq_length as "seqLength",
+                       reset_cycle as "resetCycle", enabled
+                from sys_code_rule
+                order by id limit ? offset ?
+                """, safeSize, (long) (safePage - 1) * safeSize);
+        fillSamples(rules);
+        return new PageResult(rules, total == null ? 0 : total, safePage, safeSize);
+    }
+
+    private void fillSamples(List<Map<String, Object>> rules) {
         for (Map<String, Object> rule : rules) {
             String prefix = asText(rule.get("prefix"));
             String datePattern = asText(rule.get("datePattern"));
@@ -57,7 +79,6 @@ public class CodeRuleService {
             int seqLength = rule.get("seqLength") instanceof Number number ? number.intValue() : 4;
             rule.put("sample", codeGenerator.preview(prefix, datePattern, separator, seqLength));
         }
-        return rules;
     }
 
     /**

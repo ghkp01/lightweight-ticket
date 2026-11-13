@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api, fmtQty } from '../../api'
+import ReferenceSelect from '../../components/ReferenceSelect.vue'
 
 const pad = (value: number) => String(value).padStart(2, '0')
 const dateText = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
@@ -11,18 +12,13 @@ const start = new Date()
 start.setDate(start.getDate() - 6)
 
 const range = ref<[string, string]>([dateText(start), dateText(today)])
-const centers = ref<any[]>([])
-const workCenterId = ref<number | ''>('')
+const workCenterId = ref<number | null>(null)
 const loading = ref(false)
 const data = ref<any>({ summary: {}, rows: [], faults: [] })
 
 const summary = computed(() => data.value.summary || {})
 const rows = computed(() => data.value.rows || [])
 const faults = computed(() => data.value.faults || [])
-
-const loadCenters = async () => {
-  centers.value = (await api.get('/work-centers/options')) || []
-}
 
 const load = async () => {
   loading.value = true
@@ -105,7 +101,6 @@ const saveTelemetry = async () => {
 }
 
 onMounted(async () => {
-  await loadCenters()
   await load()
 })
 </script>
@@ -123,9 +118,13 @@ onMounted(async () => {
 
     <div class="panel">
       <div class="filter-bar">
-        <el-select v-model="workCenterId" placeholder="全部工作中心" clearable filterable style="width: 200px">
-          <el-option v-for="item in centers" :key="item.id" :label="`${item.code} · ${item.name}`" :value="item.id" />
-        </el-select>
+        <ReferenceSelect
+          v-model="workCenterId"
+          url="/work-centers/options"
+          clearable
+          placeholder="全部工作中心"
+          style="width: 200px"
+        />
         <el-date-picker
           v-model="range"
           type="daterange"
@@ -257,14 +256,7 @@ onMounted(async () => {
           <el-input v-model="telemetryForm.deviceCode" placeholder="如 CNC-01 / PRESS-02" />
         </el-form-item>
         <el-form-item label="工作中心" required>
-          <el-select v-model="telemetryForm.workCenterId" placeholder="选择工作中心" filterable style="width: 100%">
-            <el-option
-              v-for="item in centers"
-              :key="item.id"
-              :label="`${item.code} · ${item.name}`"
-              :value="item.id"
-            />
-          </el-select>
+          <ReferenceSelect v-model="telemetryForm.workCenterId" url="/work-centers/options" placeholder="选择工作中心" />
         </el-form-item>
         <el-form-item label="产量（件）">
           <el-input-number v-model="telemetryForm.outputQty" :min="0" :precision="2" style="width: 100%" />

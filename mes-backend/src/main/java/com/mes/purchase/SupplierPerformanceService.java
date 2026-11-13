@@ -53,6 +53,87 @@ public class SupplierPerformanceService {
 
     /** 供应商绩效排行：按采购金额倒序，区间默认近 90 天 */
     public List<Map<String, Object>> ranking(String from, String to, Long supplierId) {
+        return rankingRows(from, to, supplierId);
+    }
+
+    /** 绩效排行分页：筛选与 KPI 都在服务端算，页面只拿当前页和汇总 */
+    public RankingPage rankingPage(String from, String to, Long supplierId,
+                                   String keyword, Boolean onlyRisk, int page, int size) {
+        List<Map<String, Object>> filtered = rankingRows(from, to, supplierId).stream()
+                .filter(row -> matches(row, keyword, Boolean.TRUE.equals(onlyRisk)))
+                .toList();
+        Map<String, Object> summary = summaryOf(filtered);
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 200);
+        int offset = Math.min((safePage - 1) * safeSize, filtered.size());
+        int end = Math.min(offset + safeSize, filtered.size());
+        return new RankingPage(filtered.subList(offset, end), filtered.size(), safePage, safeSize, summary);
+    }
+
+    public record RankingPage(List<Map<String, Object>> records, long total, int page, int size,
+                              Map<String, Object> summary) {
+    }
+
+    private boolean matches(Map<String, Object> row, String keyword, boolean onlyRisk) {
+        if (onlyRisk) {
+            boolean hasData = Boolean.TRUE.equals(row.get("hasData"));
+            BigDecimal score = row.get("score") == null ? BigDecimal.valueOf(100) : decimal(row.get("score"));
+            if (hasData && score.compareTo(BigDecimal.valueOf(80)) >= 0) {
+                return false;
+            }
+            BigDecimal onTime = row.get("onTimeRate") == null
+                    ? BigDecimal.valueOf(100) : decimal(row.get("onTimeRate"));
+            BigDecimal pass = row.get("passRate") == null
+                    ? BigDecimal.valueOf(100) : decimal(row.get("passRate"));
+            if (onTime.compareTo(BigDecimal.valueOf(90)) >= 0
+                    && pass.compareTo(BigDecimal.valueOf(95)) >= 0) {
+                return false;
+            }
+        }
+        if (keyword == null || keyword.isBlank()) {
+            return true;
+        }
+        String text = keyword.trim().toLowerCase(java.util.Locale.ROOT);
+        return java.util.stream.Stream.of(row.get("code"), row.get("name"), row.get("contact"))
+                .map(value -> value == null ? "" : String.valueOf(value).toLowerCase(java.util.Locale.ROOT))
+                .anyMatch(value -> value.contains(text));
+    }
+
+    /** 汇总口径与页面一致：只统计区间内有往来的供应商 */
+    private Map<String, Object> summaryOf(List<Map<String, Object>> rows) {
+        List<Map<String, Object>> active = rows.stream()
+                .filter(row -> Boolean.TRUE.equals(row.get("hasData")))
+                .toList();
+        BigDecimal totalAmount = active.stream()
+                .map(row -> decimal(row.get("amount")))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        List<Map<String, Object>> withReceipt = active.stream()
+                .filter(row -> intOf(row.get("judgedBatches")) > 0)
+                .toList();
+        BigDecimal onTime = withReceipt.isEmpty() ? BigDecimal.ZERO
+                : withReceipt.stream().map(row -> decimal(row.get("onTimeRate")))
+                        .reduce(BigDecimal.ZERO, BigDecimal::add)
+                        .divide(BigDecimal.valueOf(withReceipt.size()), 2, RoundingMode.HALF_UP);
+        List<Map<String, Object>> withInspection = active.stream()
+                .filter(row -> intOf(row.get("inspections")) > 0)
+                .toList();
+        BigDecimal pass = withInspection.isEmpty() ? BigDecimal.ZERO
+                : withInspection.stream().map(row -> decimal(row.get("passRate")))
+                        .reduce(BigDecimal.ZERO, BigDecimal::add)
+                        .divide(BigDecimal.valueOf(withInspection.size()), 2, RoundingMode.HALF_UP);
+        long risk = active.stream()
+                .filter(row -> decimal(row.get("score")).compareTo(BigDecimal.valueOf(80)) < 0)
+                .count();
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("count", active.size());
+        summary.put("totalAmount", totalAmount);
+        summary.put("onTime", onTime);
+        summary.put("pass", pass);
+        summary.put("risk", risk);
+        return summary;
+    }
+
+    private List<Map<String, Object>> rankingRows(String from, String to, Long supplierId) {
         Date start = parseDate(from, Date.valueOf(java.time.LocalDate.now().minusDays(90)));
         Date end = parseDate(to, Date.valueOf(java.time.LocalDate.now()));
         if (start.after(end)) {

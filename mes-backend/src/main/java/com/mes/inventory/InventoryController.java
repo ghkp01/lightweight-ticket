@@ -44,14 +44,25 @@ public class InventoryController {
     @GetMapping("/inventory")
     public ApiResponse list(@RequestParam(required = false) String keyword,
                             @RequestParam(required = false) Long warehouseId,
-                            @RequestParam(defaultValue = "false") boolean onlyWarning) {
+                            @RequestParam(defaultValue = "false") boolean onlyWarning,
+                            @RequestParam(required = false) Integer page,
+                            @RequestParam(defaultValue = "20") int size) {
+        if (page != null) {
+            return ApiResponse.ok(service.page(keyword, warehouseId, onlyWarning, page, size));
+        }
         return ApiResponse.ok(service.list(keyword, warehouseId, onlyWarning));
     }
 
-    /** 某产品在某仓的批次库存，先进先出排序 */
+    /** 某产品在某仓的批次库存，先进先出排序；带 page 时分页返回 */
     @GetMapping("/inventory/{productId}/batches")
-    public ApiResponse batches(@PathVariable long productId, @RequestParam long warehouseId) {
-        return ApiResponse.ok(service.batchStocks(productId, warehouseId));
+    public ApiResponse batches(@PathVariable long productId, @RequestParam long warehouseId,
+                               @RequestParam(required = false) String keyword,
+                               @RequestParam(required = false) Integer page,
+                               @RequestParam(defaultValue = "20") int size) {
+        if (page != null) {
+            return ApiResponse.ok(service.batchStocks(productId, warehouseId, keyword, page, size));
+        }
+        return ApiResponse.ok(service.batchStocks(productId, warehouseId, keyword));
     }
 
     @GetMapping("/inventory/txns")

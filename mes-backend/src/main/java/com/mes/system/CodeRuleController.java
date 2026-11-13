@@ -24,7 +24,11 @@ public class CodeRuleController {
 
     @GetMapping("/code-rules")
     @PreAuthorize("hasRole('ADMIN')")
-    public ApiResponse list() {
+    public ApiResponse list(@RequestParam(required = false) Integer page,
+                            @RequestParam(required = false) Integer size) {
+        if (page != null) {
+            return ApiResponse.ok(service.page(page, size == null ? 20 : size));
+        }
         return ApiResponse.ok(service.list());
     }
 

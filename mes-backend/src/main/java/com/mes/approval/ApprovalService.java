@@ -221,6 +221,33 @@ public class ApprovalService implements ApprovalPort {
                 from sys_approval_flow f
                 order by f.biz_type, f.priority desc, f.id
                 """);
+        enrichFlows(rows);
+        return rows;
+    }
+
+    /** 审批流列表分页；不传 page 时仍走 flows() 返回全量 */
+    public PageResult flowsPage(int page, int size) {
+        int safePage = Math.max(1, page);
+        int safeSize = Math.max(1, Math.min(size, 200));
+        Long total = jdbcTemplate.queryForObject("select count(*) from sys_approval_flow", Long.class);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                select f.id, f.code, f.name, f.biz_type as "bizType", f.enabled, f.remark,
+                       f.process_key as "processKey", f.process_version as "processVersion", f.webhook_url as "webhookUrl",
+                       f.stable_version as "stableVersion", f.canary_version as "canaryVersion",
+                       f.canary_percent as "canaryPercent", f.signature_required as "signatureRequired",
+                       f.canary_factory_ids as "canaryFactoryIds", f.canary_users as "canaryUsers",
+                       f.canary_note as "canaryNote", f.priority, f.match_rules as "matchRules",
+                       f.match_note as "matchNote",
+                       to_char(f.created_at, 'YYYY-MM-DD HH24:MI') as "createdAt"
+                from sys_approval_flow f
+                order by f.biz_type, f.priority desc, f.id
+                limit ? offset ?
+                """, safeSize, (long) (safePage - 1) * safeSize);
+        enrichFlows(rows);
+        return new PageResult(rows, total == null ? 0 : total, safePage, safeSize);
+    }
+
+    private void enrichFlows(List<Map<String, Object>> rows) {
         for (Map<String, Object> row : rows) {
             List<Map<String, Object>> nodes = bpmnNodes(String.valueOf(row.get("code")));
             row.put("nodes", nodes);
@@ -233,7 +260,6 @@ public class ApprovalService implements ApprovalPort {
             row.put("catchAll", rules != null && rules.isEmpty());
             row.put("matchSummary", summarizeRules(rules));
         }
-        return rows;
     }
 
     /** 规则摘要：给列表页一眼看出这条链的条件 */
@@ -1517,6 +1543,16 @@ public class ApprovalService implements ApprovalPort {
             result.add(row);
         }
         return result;
+    }
+
+    /** 我的待办分页：引擎与加签待办合并排序后按页切片；不传 page 时仍走 myTasks() */
+    public PageResult myTasksPage(int page, int size) {
+        int safePage = Math.max(1, page);
+        int safeSize = Math.max(1, Math.min(size, 100));
+        List<Map<String, Object>> rows = myTasks();
+        int from = Math.min((safePage - 1) * safeSize, rows.size());
+        int to = Math.min(from + safeSize, rows.size());
+        return new PageResult(new ArrayList<>(rows.subList(from, to)), rows.size(), safePage, safeSize);
     }
 
     private String processKeyOf(String processDefinitionId) {

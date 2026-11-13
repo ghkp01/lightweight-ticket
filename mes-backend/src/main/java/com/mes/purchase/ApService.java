@@ -781,6 +781,12 @@ public class ApService {
 
     /** 可开红字发票的蓝票：已匹配/部分付款/已付清，且带每行可红冲数量 */
     public List<Map<String, Object>> creditCandidates(Long supplierId) {
+        return creditCandidates(supplierId, null, 100);
+    }
+
+    /** 红字发票候选：keyword 匹配发票号/供应商/采购单号，limit 限制返回条数（逐单带明细，条数不宜过大） */
+    public List<Map<String, Object>> creditCandidates(Long supplierId, String keyword, Integer limit) {
+        int size = limit == null ? 100 : Math.max(1, Math.min(limit, 100));
         String sql = """
                 select i.id, i.invoice_no as "invoiceNo", s.id as "supplierId", s.name as "supplierName",
                        o.order_no as "purchaseOrderNo", i.status,
@@ -792,10 +798,21 @@ public class ApService {
                 left join purchase_order o on o.id = i.purchase_order_id
                 where i.invoice_type <> 'CREDIT' and i.status in ('MATCHED', 'PARTIAL', 'PAID')
                 """;
-        List<Map<String, Object>> list = supplierId == null
-                ? jdbcTemplate.queryForList(sql + scopeSql("i.factory_org_id") + " order by i.id desc limit 100")
-                : jdbcTemplate.queryForList(sql + " and i.supplier_id = ?" + scopeSql("i.factory_org_id")
-                        + " order by i.id desc limit 100", supplierId);
+        List<Object> args = new java.util.ArrayList<>();
+        if (supplierId != null) {
+            sql += " and i.supplier_id = ?";
+            args.add(supplierId);
+        }
+        if (keyword != null && !keyword.isBlank()) {
+            sql += " and (i.invoice_no ilike ? or s.name ilike ? or coalesce(o.order_no, '') ilike ?)";
+            String like = "%" + keyword.trim() + "%";
+            args.add(like);
+            args.add(like);
+            args.add(like);
+        }
+        args.add(size);
+        List<Map<String, Object>> list = jdbcTemplate.queryForList(
+                sql + scopeSql("i.factory_org_id") + " order by i.id desc limit ?", args.toArray());
         for (Map<String, Object> row : list) {
             List<Map<String, Object>> items = jdbcTemplate.queryForList("""
                     select ii.id as "invoiceItemId", ii.qty, ii.price, ii.matched_qty as "matchedQty",

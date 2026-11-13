@@ -159,6 +159,12 @@ public class PurchaseReturnService {
 
     /** 可以发起退货的采购入库单：已完成、挂采购单、还有可退数量 */
     public List<Map<String, Object>> returnableInbounds(String keyword) {
+        return returnableInbounds(keyword, null);
+    }
+
+    /** 引用选择专用：关键字过滤 + 条数上限；limit 为空时保持原行为（最多 100 条） */
+    public List<Map<String, Object>> returnableInbounds(String keyword, Integer limit) {
+        int max = limit != null && limit > 0 ? Math.min(Math.min(limit, 50), 100) : 100;
         String like = "%" + (keyword == null ? "" : keyword.trim()) + "%";
         // 入库单归仓储模块：先拿一批已完成的采购入库单，再在内存里按关键字过滤
         List<InboundOrderPort.InboundOrderView> candidates = inboundOrderPort.completedPurchaseInbounds(300);
@@ -201,7 +207,7 @@ public class PurchaseReturnService {
             row.put("completedAt", view.completedAt());
             row.put("returnableLines", returnableLines);
             result.add(row);
-            if (result.size() >= 100) {
+            if (result.size() >= max) {
                 break;
             }
         }

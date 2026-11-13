@@ -24,6 +24,7 @@ const props = withDefaults(defineProps<{
   initialLabel?: string
   labelField?: string
   codeField?: string
+  valueField?: string
   size?: 'large' | 'default' | 'small'
   limit?: number
 }>(), {
@@ -35,6 +36,7 @@ const props = withDefaults(defineProps<{
   initialLabel: '',
   labelField: 'name',
   codeField: 'code',
+  valueField: 'id',
   size: 'default',
   limit: 20
 })
@@ -56,12 +58,14 @@ const labelOf = (row: any) => {
   return String(name ?? code ?? '')
 }
 
+const optionValue = (row: any) => row?.[props.valueField]
+
 /** 编辑回显：当前值不在搜索结果里时，用页面传入的名称补一个虚拟选项 */
 const ensureInitial = () => {
   if (props.modelValue == null || !props.initialLabel) return
-  if (options.value.some((row) => String(row.id) === String(props.modelValue))) return
+  if (options.value.some((row) => String(optionValue(row)) === String(props.modelValue))) return
   options.value = [
-    { id: props.modelValue, _virtual: true, [props.labelField]: props.initialLabel },
+    { [props.valueField]: props.modelValue, _virtual: true, [props.labelField]: props.initialLabel },
     ...options.value
   ]
 }
@@ -92,7 +96,7 @@ const remote = (query: string) => {
 
 const onChange = (value: any) => {
   emit('update:modelValue', value)
-  emit('select', options.value.find((row) => String(row.id) === String(value)) || null)
+  emit('select', options.value.find((row) => String(optionValue(row)) === String(value)) || null)
 }
 
 watch(() => props.modelValue, ensureInitial)
@@ -120,6 +124,6 @@ onBeforeUnmount(() => {
     @change="onChange"
     @visible-change="(visible: boolean) => visible && !options.length && load('')"
   >
-    <el-option v-for="item in options" :key="item.id" :label="labelOf(item)" :value="item.id" />
+    <el-option v-for="item in options" :key="optionValue(item)" :label="labelOf(item)" :value="optionValue(item)" />
   </el-select>
 </template>

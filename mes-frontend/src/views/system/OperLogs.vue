@@ -7,6 +7,9 @@ import { useTableView } from '../../composables/useTableView'
 
 const loading = ref(false)
 const rows = ref<any[]>([])
+const page = ref(1)
+const size = ref(20)
+const total = ref(0)
 const options = ref<any>({ modules: [], operators: [], total: 0, failed: 0, latest: '' })
 const detail = ref<any>(null)
 const drawer = ref(false)
@@ -48,7 +51,15 @@ const table = useTableView({
   }
 })
 
-const reload = () => load()
+const reload = () => {
+  page.value = 1
+  load()
+}
+
+const changePage = (value: number) => {
+  page.value = value
+  load()
+}
 
 const load = async () => {
   loading.value = true
@@ -60,9 +71,11 @@ const load = async () => {
       success: filters.success || undefined,
       from: filters.range?.[0] || undefined,
       to: filters.range?.[1] || undefined,
-      limit: 300
+      page: page.value,
+      size: size.value
     })
-    rows.value = Array.isArray(data) ? data : []
+    rows.value = data?.records || []
+    total.value = data?.total || 0
   } finally {
     loading.value = false
   }
@@ -121,7 +134,7 @@ onMounted(async () => {
 
     <div class="panel">
       <div class="filter-bar">
-        <el-select v-model="filters.module" placeholder="全部模块" clearable style="width: 140px" @change="load">
+        <el-select v-model="filters.module" placeholder="全部模块" clearable style="width: 140px" @change="reload">
           <el-option v-for="item in options.modules || []" :key="item" :label="item" :value="item" />
         </el-select>
         <el-select
@@ -132,11 +145,11 @@ onMounted(async () => {
           allow-create
           default-first-option
           style="width: 150px"
-          @change="load"
+          @change="reload"
         >
           <el-option v-for="item in options.operators || []" :key="item" :label="item" :value="item" />
         </el-select>
-        <el-select v-model="filters.success" placeholder="全部结果" clearable style="width: 120px" @change="load">
+        <el-select v-model="filters.success" placeholder="全部结果" clearable style="width: 120px" @change="reload">
           <el-option label="成功" value="true" />
           <el-option label="失败" value="false" />
         </el-select>
@@ -145,7 +158,7 @@ onMounted(async () => {
           placeholder="摘要 / 单号 / 路径"
           clearable
           style="width: 220px"
-          @keyup.enter="load"
+          @keyup.enter="reload"
         />
         <el-date-picker
           v-model="filters.range"
@@ -155,13 +168,23 @@ onMounted(async () => {
           end-placeholder="结束日期"
           style="width: 240px"
         />
-        <el-button type="primary" plain @click="load">查询</el-button>
+        <el-button type="primary" plain @click="reload">查询</el-button>
         <div class="spacer"></div>
         <TableToolbar :table="table" export-api="/system/logs" export-name="操作日志" @applied="reload" />
+        <span class="toolbar-tip">共 {{ total }} 条日志</span>
       </div>
 
       <div class="table-wrap">
-        <DataTable :table="table" :data="rows" :loading="loading" @row-click="open">
+        <DataTable
+          :table="table"
+          :data="rows"
+          :loading="loading"
+          :total="total"
+          :page="page"
+          :size="size"
+          @page-change="changePage"
+          @row-click="open"
+        >
           <template #cell-createdAt="{ row }"><span class="mono">{{ row.createdAt }}</span></template>
           <template #cell-bizNo="{ row }"><span class="mono muted">{{ row.bizNo || '-' }}</span></template>
           <template #cell-operator="{ row }">

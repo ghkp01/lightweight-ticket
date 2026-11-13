@@ -106,8 +106,10 @@ public class ApController {
     }
 
     @GetMapping("/credit-candidates")
-    public ApiResponse creditCandidates(@RequestParam(required = false) Long supplierId) {
-        return ApiResponse.ok(service.creditCandidates(supplierId));
+    public ApiResponse creditCandidates(@RequestParam(required = false) Long supplierId,
+                                        @RequestParam(required = false) String keyword,
+                                        @RequestParam(required = false) Integer limit) {
+        return ApiResponse.ok(service.creditCandidates(supplierId, keyword, limit));
     }
 
     @PostMapping("/credit-invoices/{id}/match")

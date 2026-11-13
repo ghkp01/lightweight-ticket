@@ -55,8 +55,6 @@ const reload = () => {
   load()
 }
 const summary = ref<any>({ rate: 100, inspectQty: 0, defectQty: 0, total: 0 })
-const finishedWorks = ref<any[]>([])
-const inboundOrders = ref<any[]>([])
 
 const dialog = ref(false)
 const saving = ref(false)
@@ -123,12 +121,6 @@ const load = async () => {
 }
 
 const openCreate = async () => {
-  const [workData, inboundData] = await Promise.all([
-    api.get('/work-orders', { status: 'FINISHED', page: 1, size: 100 }),
-    api.get('/inbound-orders', { status: 'PENDING_QC', page: 1, size: 100 })
-  ])
-  finishedWorks.value = workData.records
-  inboundOrders.value = inboundData.records
   Object.assign(form, {
     type: 'FINAL',
     workOrderId: null,
@@ -165,6 +157,13 @@ const onTypeChange = () => {
 }
 
 const onInboundChange = async (id: number) => {
+  if (!id) {
+    form.refNo = ''
+    form.productId = null
+    form.productLabel = ''
+    form.inspectQty = 1
+    return
+  }
   const data = await api.get(`/inbound-orders/${id}`)
   form.refNo = data.inboundNo
   form.inspectQty = Number(data.totalQty || 1)
@@ -178,28 +177,23 @@ const onInboundChange = async (id: number) => {
 }
 
 const onWorkChange = async (id: number) => {
-  const work = finishedWorks.value.find((item) => item.id === id)
-  if (work) {
-    // 列表接口老版本没带 productId 时保留原值，下面用详情再补一次
-    form.productId = work.productId || form.productId
-    form.productLabel = work.productCode
-      ? `${work.productCode} · ${work.productName}`
-      : (work.productName || form.productLabel)
-    form.refNo = work.workNo
-    form.inspectQty = Number(work.planQty)
-    form.refType = 'WORK_ORDER'
-  }
   workOperations.value = []
   form.reworkFromSeq = null
-  if (!id) return
+  if (!id) {
+    form.productId = null
+    form.productLabel = ''
+    form.refNo = ''
+    return
+  }
   try {
     const detail = await api.get(`/work-orders/${id}`)
-    if (!form.productId && detail.productId) {
-      form.productId = detail.productId
-      form.productLabel = detail.productCode
-        ? `${detail.productCode} · ${detail.productName}`
-        : (detail.productName || '')
-    }
+    form.productId = detail.productId
+    form.productLabel = detail.productCode
+      ? `${detail.productCode} · ${detail.productName}`
+      : (detail.productName || '')
+    form.refNo = detail.workNo
+    form.inspectQty = Number(detail.planQty || 1)
+    form.refType = 'WORK_ORDER'
     workOperations.value = detail.operations || []
     // 默认整件返修（从第一道工序起），需要时再改成从中间某道工序起
     form.reworkFromSeq = workOperations.value.length ? workOperations.value[0].seq : null
@@ -398,17 +392,17 @@ onMounted(async () => {
 
     <div class="panel">
       <div class="filter-bar">
-        <el-input v-model="keyword" placeholder="检验单号 / 产品 / 来源单" clearable style="width: 240px" @keyup.enter="load" />
-        <el-select v-model="type" placeholder="全部类型" clearable style="width: 140px" @change="load">
+        <el-input v-model="keyword" placeholder="检验单号 / 产品 / 来源单" clearable style="width: 240px" @keyup.enter="reload" />
+        <el-select v-model="type" placeholder="全部类型" clearable style="width: 140px" @change="reload">
           <el-option label="来料检验" value="INCOMING" />
           <el-option label="过程检验" value="PROCESS" />
           <el-option label="完工检验" value="FINAL" />
         </el-select>
-        <el-select v-model="result" placeholder="全部结果" clearable style="width: 130px" @change="load">
+        <el-select v-model="result" placeholder="全部结果" clearable style="width: 130px" @change="reload">
           <el-option label="合格" value="PASS" />
           <el-option label="不合格" value="FAIL" />
         </el-select>
-        <el-button type="primary" plain @click="load">查询</el-button>
+        <el-button type="primary" plain @click="reload">查询</el-button>
         <div class="spacer"></div>
         <TableToolbar :table="table" export-api="/inspections" export-name="质量检验" @applied="reload" />
         <span class="toolbar-tip">共 {{ total }} 张检验单</span>
@@ -458,27 +452,30 @@ onMounted(async () => {
             </el-select>
           </el-form-item>
           <el-form-item v-if="form.type === 'FINAL'" label="生产工单" required>
-            <el-select v-model="form.workOrderId" filterable style="width: 100%" @change="onWorkChange">
-              <el-option
-                v-for="item in finishedWorks"
-                :key="item.id"
-                :label="`${item.workNo} · ${item.productName} × ${fmtQty(item.planQty)}`"
-                :value="item.id"
-              />
-            </el-select>
+            <ReferenceSelect
+              v-model="form.workOrderId"
+              url="/work-orders/options"
+              :params="{ status: 'FINISHED' }"
+              code-field="workNo"
+              label-field="productName"
+              placeholder="输入工单号或产品搜索（已完工）"
+              @select="(work) => onWorkChange(work ? work.id : null)"
+            />
           </el-form-item>
           <el-form-item v-if="form.type === 'FINAL'" label="受检产品">
             <el-input :model-value="productLabel" disabled placeholder="选择工单后自动带出" />
           </el-form-item>
           <el-form-item v-else-if="form.type === 'INCOMING'" label="待检入库单" required>
-            <el-select v-model="form.inboundOrderId" filterable style="width: 100%" @change="onInboundChange">
-              <el-option
-                v-for="item in inboundOrders"
-                :key="item.id"
-                :label="`${item.inboundNo} · ${item.supplier || '无供应商'} · ${fmtQty(item.totalQty)}`"
-                :value="item.id"
-              />
-            </el-select>
+            <ReferenceSelect
+              v-model="form.inboundOrderId"
+              url="/inbound-orders/options"
+              :params="{ status: 'PENDING_QC' }"
+              code-field="inboundNo"
+              label-field="supplier"
+              :limit="30"
+              placeholder="输入入库单号或供应商搜索（待检）"
+              @select="(order) => onInboundChange(order ? order.id : null)"
+            />
           </el-form-item>
           <el-form-item v-else label="产品" required>
             <ReferenceSelect v-model="form.productId" url="/options/products"

@@ -1,6 +1,7 @@
 package com.mes.task;
 
 import com.mes.common.BizException;
+import com.mes.common.PageResult;
 import com.mes.notice.api.NoticeMessage;
 import com.mes.notice.api.NoticePort;
 import com.mes.security.CurrentUser;
@@ -185,14 +186,63 @@ public class BizTaskService implements TaskPort {
 
     /** 我的任务：点名给我的，加上我所处角色池里还没认领的 */
     public List<Map<String, Object>> mine(String username, String status, String taskType) {
+        QueryParts parts = mineParts(username, status, taskType);
+        parts.args().add(MAX_ROWS);
+        return jdbcTemplate.queryForList(baseSelect() + parts.where() + orderBy() + " limit ?",
+                parts.args().toArray());
+    }
+
+    /** 我的任务分页：任务会持续累积，列表页改为后端分页 */
+    public PageResult minePage(String username, String status, String taskType, int page, int size) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 200);
+        QueryParts countParts = mineParts(username, status, taskType);
+        Long total = jdbcTemplate.queryForObject(
+                "select count(*) from biz_task t " + countParts.where(),
+                Long.class, countParts.args().toArray());
+        QueryParts parts = mineParts(username, status, taskType);
+        parts.args().add(safeSize);
+        parts.args().add((safePage - 1) * safeSize);
+        List<Map<String, Object>> records = jdbcTemplate.queryForList(
+                baseSelect() + parts.where() + orderBy() + " limit ? offset ?", parts.args().toArray());
+        return new PageResult(records, total == null ? 0 : total, safePage, safeSize);
+    }
+
+    /** 全部任务：管理岗用来发现「没人认领」和「到期没做」的活 */
+    public List<Map<String, Object>> all(String status, String taskType, String keyword) {
+        QueryParts parts = allParts(status, taskType, keyword);
+        parts.args().add(MAX_ROWS);
+        return jdbcTemplate.queryForList(baseSelect() + parts.where() + orderBy() + " limit ?",
+                parts.args().toArray());
+    }
+
+    /** 全部任务分页 */
+    public PageResult allPage(String status, String taskType, String keyword, int page, int size) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 200);
+        QueryParts countParts = allParts(status, taskType, keyword);
+        Long total = jdbcTemplate.queryForObject(
+                "select count(*) from biz_task t " + countParts.where(),
+                Long.class, countParts.args().toArray());
+        QueryParts parts = allParts(status, taskType, keyword);
+        parts.args().add(safeSize);
+        parts.args().add((safePage - 1) * safeSize);
+        List<Map<String, Object>> records = jdbcTemplate.queryForList(
+                baseSelect() + parts.where() + orderBy() + " limit ? offset ?", parts.args().toArray());
+        return new PageResult(records, total == null ? 0 : total, safePage, safeSize);
+    }
+
+    private record QueryParts(StringBuilder where, List<Object> args) {
+    }
+
+    private QueryParts mineParts(String username, String status, String taskType) {
         List<Object> args = new ArrayList<>();
-        StringBuilder sql = new StringBuilder(baseSelect());
-        sql.append(" where 1 = 1 ");
+        StringBuilder where = new StringBuilder(" where 1 = 1 ");
         if (!blank(status) && !"ALL".equalsIgnoreCase(status)) {
-            sql.append(" and t.status = ? ");
+            where.append(" and t.status = ? ");
             args.add(status.trim().toUpperCase());
         }
-        sql.append("""
+        where.append("""
                  and (t.assignee_username = ?
                       or (t.assignee_username is null
                           and t.assignee_role = (select role from sys_user where username = ?)))
@@ -200,38 +250,32 @@ public class BizTaskService implements TaskPort {
         args.add(username);
         args.add(username);
         if (!blank(taskType) && !"ALL".equalsIgnoreCase(taskType)) {
-            sql.append(" and t.task_type = ? ");
+            where.append(" and t.task_type = ? ");
             args.add(taskType.trim().toUpperCase());
         }
-        sql.append(orderBy()).append(" limit ?");
-        args.add(MAX_ROWS);
-        return jdbcTemplate.queryForList(sql.toString(), args.toArray());
+        return new QueryParts(where, args);
     }
 
-    /** 全部任务：管理岗用来发现「没人认领」和「到期没做」的活 */
-    public List<Map<String, Object>> all(String status, String taskType, String keyword) {
+    private QueryParts allParts(String status, String taskType, String keyword) {
         List<Object> args = new ArrayList<>();
-        StringBuilder sql = new StringBuilder(baseSelect());
-        sql.append(" where 1 = 1 ");
+        StringBuilder where = new StringBuilder(" where 1 = 1 ");
         if (!blank(status) && !"ALL".equalsIgnoreCase(status)) {
-            sql.append(" and t.status = ? ");
+            where.append(" and t.status = ? ");
             args.add(status.trim().toUpperCase());
         } else {
-            sql.append(" and t.status = 'OPEN' ");
+            where.append(" and t.status = 'OPEN' ");
         }
         if (!blank(taskType) && !"ALL".equalsIgnoreCase(taskType)) {
-            sql.append(" and t.task_type = ? ");
+            where.append(" and t.task_type = ? ");
             args.add(taskType.trim().toUpperCase());
         }
         if (!blank(keyword)) {
-            sql.append(" and (t.title ilike ? or t.ref_no ilike ?) ");
+            where.append(" and (t.title ilike ? or t.ref_no ilike ?) ");
             String like = "%" + keyword.trim() + "%";
             args.add(like);
             args.add(like);
         }
-        sql.append(orderBy()).append(" limit ?");
-        args.add(MAX_ROWS);
-        return jdbcTemplate.queryForList(sql.toString(), args.toArray());
+        return new QueryParts(where, args);
     }
 
     /** 我的任务概况：未完成条数、逾期条数，工作台与菜单角标用 */

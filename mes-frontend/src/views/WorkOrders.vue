@@ -126,7 +126,6 @@ const form = reactive<any>({
 // 建单预览：选完产品就把「会生成哪些工序、要备哪些料」摆出来，
 // 别让人建完再进详情页才发现路线没维护、BOM 是空的
 const createPreview = ref<any>({ routing: [], bom: [], loading: false })
-const createUsers = ref<any[]>([])
 /** 建单预览要用的产品档案字段（规格/单位/库存/损耗率/追溯方式）由选择结果带出 */
 const createProduct = ref<any>(null)
 
@@ -150,15 +149,6 @@ const loadCreatePreview = async () => {
     createPreview.value = { routing: rows, bom: bom || [], loading: false }
   } catch {
     createPreview.value = { routing: [], bom: [], loading: false }
-  }
-}
-
-const loadCreateUsers = async () => {
-  if (createUsers.value.length) return
-  try {
-    createUsers.value = (await api.get('/system/users/options')) || []
-  } catch {
-    createUsers.value = []
   }
 }
 
@@ -255,8 +245,8 @@ const reportNeedInspect = computed(() => reportOperation.value?.inspectionMode =
 const assignDialog = ref(false)
 const assignSaving = ref(false)
 const assignWork = ref<any>(null)
-const assignUsers = ref<any[]>([])
-const assignAllUsers = ref<any[]>([])
+const assignSkillScoped = ref(false)
+const assignProcessId = ref<number | null>(null)
 const assignSkillHint = ref('')
 const assignForm = reactive<any>({ operationId: null, reportPolicy: 'ANY', rows: [] })
 
@@ -663,7 +653,6 @@ const openCreate = async () => {
   createPreview.value = { routing: [], bom: [], loading: false }
   createProduct.value = null
   createDialog.value = true
-  loadCreateUsers()
 }
 
 const create = async () => {
@@ -702,16 +691,28 @@ const create = async () => {
 const unitData = ref<any>(null)
 const unitLoading = ref(false)
 const unitGenerating = ref(false)
+const unitPage = ref(1)
+const unitPageSize = 20
 
-const loadUnits = async (workOrderId: number) => {
+const loadUnits = async (workOrderId: number, page = 1) => {
   unitLoading.value = true
   try {
-    unitData.value = await api.get('/work-order-units', { workOrderId })
+    unitPage.value = page
+    unitData.value = await api.get('/work-order-units', {
+      workOrderId,
+      page,
+      size: unitPageSize
+    })
   } catch (err) {
     unitData.value = null
   } finally {
     unitLoading.value = false
   }
+}
+
+const changeUnitPage = (value: number) => {
+  if (!detail.value) return
+  loadUnits(detail.value.id, value)
 }
 
 const generateUnits = async () => {
@@ -720,7 +721,7 @@ const generateUnits = async () => {
   try {
     const count = await api.post(`/work-orders/${detail.value.id}/units/generate`)
     ElMessage.success(`已生成 ${count} 个件码`)
-    await loadUnits(detail.value.id)
+    await loadUnits(detail.value.id, 1)
   } catch (err) {
     // 错误提示由 api 拦截器统一弹出
   } finally {
@@ -1113,12 +1114,14 @@ const fillAssignRows = () => {
   if (current.length) {
     assignForm.rows = current.map((row: any) => ({
       userId: row.userId,
+      workerName: row.workerName || '',
       quotaQty: Number(row.quotaQty)
     }))
     return
   }
   assignForm.rows = [{
     userId: op?.assignedUserId || null,
+    workerName: op?.assignedWorker || '',
     quotaQty: Number(op?.planQty || 0)
   }]
 }
@@ -1150,29 +1153,24 @@ const openAssignFor = async (op: any) => {
   assignDialog.value = true
 }
 
-/** 派工候选人：工序启用了持证管控就只列持证人员，没配置技能则放开所有人。
- * 这样既满足「派给会做的人」，也不会在新库里把工序全锁死。
+/** 派工候选人：工序启用了持证管控就只列持证人员，两者都走远程搜索，避免一次拉全量用户。
+ * 没配置技能时放开所有人；配置了技能但当前关键字没匹配到时仍只在持证范围内检索。
  */
 const loadAssignUsers = async (processId?: number) => {
-  if (!assignAllUsers.value.length) {
-    assignAllUsers.value = await api.get('/system/users/options')
-  }
+  assignProcessId.value = processId || null
   if (!processId) {
-    assignUsers.value = assignAllUsers.value
+    assignSkillScoped.value = false
     assignSkillHint.value = '该工序没有绑定工序主数据，可选任意人员'
     return
   }
   try {
-    const skilled = await api.get(`/processes/${processId}/skill-users`)
-    if (skilled && skilled.length) {
-      assignUsers.value = skilled
-      assignSkillHint.value = `该工序有 ${skilled.length} 人持证，只能派给其中一人`
-    } else {
-      assignUsers.value = assignAllUsers.value
-      assignSkillHint.value = '该工序还没配置技能，可选任意人员；到「用户管理 → 技能」可以限定持证范围'
-    }
+    const skilled = await api.get(`/processes/${processId}/skill-users`, { limit: 20 })
+    assignSkillScoped.value = Array.isArray(skilled) && skilled.length > 0
+    assignSkillHint.value = assignSkillScoped.value
+      ? '该工序启用了持证管控，只能派给持证人员；输入姓名或账号搜索'
+      : '该工序还没配置技能，可选任意人员；到「用户管理 → 技能」可以限定持证范围'
   } catch {
-    assignUsers.value = assignAllUsers.value
+    assignSkillScoped.value = false
     assignSkillHint.value = '技能信息加载失败，已放开全部人员'
   }
 }
@@ -1185,13 +1183,13 @@ const onAssignOpChange = async () => {
 }
 
 const addAssignRow = () => {
-  assignForm.rows.push({ userId: null, quotaQty: null })
+  assignForm.rows.push({ userId: null, workerName: '', quotaQty: null })
 }
 
 const removeAssignRow = (index: number) => {
   assignForm.rows.splice(index, 1)
   if (!assignForm.rows.length) {
-    assignForm.rows.push({ userId: null, quotaQty: null })
+    assignForm.rows.push({ userId: null, workerName: '', quotaQty: null })
   }
 }
 
@@ -1512,8 +1510,8 @@ onMounted(async () => {
 
     <div class="panel">
       <div class="filter-bar">
-        <el-input v-model="keyword" placeholder="工单号 / 产品名称" clearable style="width: 240px" @keyup.enter="load" />
-        <el-select v-model="status" placeholder="全部状态" clearable style="width: 140px" @change="load">
+        <el-input v-model="keyword" placeholder="工单号 / 产品名称" clearable style="width: 240px" @keyup.enter="reload" />
+        <el-select v-model="status" placeholder="全部状态" clearable style="width: 140px" @change="reload">
           <el-option label="草稿" value="DRAFT" />
           <el-option label="已排产" value="SCHEDULED" />
           <el-option label="已下达" value="RELEASED" />
@@ -1544,7 +1542,7 @@ onMounted(async () => {
             :placeholder="`${activeCustomField.label}的值`"
             clearable
             style="width: 150px"
-            @change="load"
+            @change="reload"
           >
             <template v-if="activeCustomField.fieldType === 'SWITCH'">
               <el-option label="是" value="true" />
@@ -1564,7 +1562,7 @@ onMounted(async () => {
             value-format="YYYY-MM-DD"
             :placeholder="activeCustomField.label"
             style="width: 150px"
-            @change="load"
+            @change="reload"
           />
           <el-input
             v-else
@@ -1572,11 +1570,11 @@ onMounted(async () => {
             :placeholder="`${activeCustomField.label}的值`"
             clearable
             style="width: 150px"
-            @keyup.enter="load"
+            @keyup.enter="reload"
           />
         </template>
-        <el-button type="primary" plain @click="load">查询</el-button>
-        <el-checkbox v-model="onlyShortage" label="只看缺料" border size="small" @change="load" />
+        <el-button type="primary" plain @click="reload">查询</el-button>
+        <el-checkbox v-model="onlyShortage" label="只看缺料" border size="small" @change="reload" />
         <div class="spacer"></div>
         <TableToolbar
           :table="table"
@@ -1845,22 +1843,15 @@ onMounted(async () => {
                 </el-table-column>
                 <el-table-column label="报工人" width="170">
                   <template #default="{ row }">
-                    <el-select
+                    <ReferenceSelect
                       v-model="row.assignUserId"
-                      clearable
-                      filterable
+                      url="/system/users/options"
+                      code-field="username"
+                      label-field="realName"
                       size="small"
                       placeholder="建完再派"
-                      style="width: 100%"
-                      @change="() => { if (!row.assignUserId) row.reportPolicy = 'ANY' }"
-                    >
-                      <el-option
-                        v-for="user in createUsers"
-                        :key="user.id"
-                        :label="user.realName ? `${user.realName}（${user.username}）` : user.username"
-                        :value="user.id"
-                      />
-                    </el-select>
+                      @select="(user) => { if (!user) row.reportPolicy = 'ANY' }"
+                    />
                   </template>
                 </el-table-column>
                 <el-table-column label="报工权限" width="140">
@@ -2438,7 +2429,10 @@ onMounted(async () => {
                   <span>{{ bucket.label }}</span>
                   <b class="num">{{ bucket.count }}</b>
                 </div>
-                <div class="unit-dist-codes">{{ (bucket.units || []).join('、') }}</div>
+                <div class="unit-dist-codes">
+                  {{ (bucket.units || []).join('、') }}
+                  <span v-if="bucket.count > (bucket.units || []).length"> 等 {{ bucket.count }} 件</span>
+                </div>
               </div>
             </div>
             <el-table :data="unitData.units" size="small" max-height="280">
@@ -2462,6 +2456,16 @@ onMounted(async () => {
                 <template #default="{ row }">{{ row.lastActionText || '-' }}</template>
               </el-table-column>
             </el-table>
+            <el-pagination
+              v-if="(unitData.total || unitData.summary?.total || 0) > unitPageSize"
+              size="small"
+              layout="total, prev, pager, next"
+              :total="Number(unitData.total || unitData.summary?.total || 0)"
+              :page-size="unitPageSize"
+              :current-page="unitPage"
+              style="margin-top: 8px; justify-content: flex-end"
+              @current-change="changeUnitPage"
+            />
             <div class="section-note">
               每件的开工、完工、报废都会留痕；车间扫件码可继续流转。同一道工序内的多件状态相同，件码是区分它们的最小单位。
             </div>
@@ -2717,27 +2721,17 @@ onMounted(async () => {
           <el-table :data="assignForm.rows" size="small" style="width: 100%">
             <el-table-column label="人员" min-width="200">
               <template #default="{ row }">
-                <el-select
+                <ReferenceSelect
+                  :key="assignSkillScoped ? `skill-${assignProcessId}` : 'all-users'"
                   v-model="row.userId"
-                  filterable
+                  :url="assignSkillScoped ? `/processes/${assignProcessId}/skill-users` : '/system/users/options'"
+                  code-field="username"
+                  label-field="realName"
+                  :initial-label="row.workerName"
                   clearable
-                  placeholder="从系统用户里选择"
-                  style="width: 100%"
-                >
-                  <el-option
-                    v-for="user in assignUsers"
-                    :key="user.id"
-                    :label="`${user.realName}（${user.orgName || '未分配组织'}${user.position ? ' · ' + user.position : ''}）`"
-                    :value="user.id"
-                  >
-                    <div class="user-option">
-                      <span class="user-option-name">{{ user.realName }}</span>
-                      <span class="user-option-meta">
-                        {{ user.username }} · {{ user.orgName || '未分配组织' }}{{ user.position ? ' · ' + user.position : '' }}
-                      </span>
-                    </div>
-                  </el-option>
-                </el-select>
+                  placeholder="输入姓名或账号搜索"
+                  @select="(user) => (row.workerName = user ? (user.realName || user.username) : '')"
+                />
               </template>
             </el-table-column>
             <el-table-column label="分配数量" width="140">

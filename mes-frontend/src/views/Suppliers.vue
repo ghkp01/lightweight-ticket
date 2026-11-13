@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, nextCode } from '../api'
 import DataTable from '../components/DataTable.vue'
@@ -11,6 +11,9 @@ const rows = ref<any[]>([])
 const keyword = ref('')
 const category = ref('')
 const enabled = ref('')
+const page = ref(1)
+const size = ref(20)
+const total = ref(0)
 
 // 表格视图：列显示 / 冻结 / 列宽与默认筛选按账号保存
 const table = useTableView({
@@ -32,10 +35,13 @@ const table = useTableView({
     keyword.value = filters.keyword || ''
     category.value = filters.category || ''
     enabled.value = filters.enabled || ''
-  }
+  },
+  getPageSize: () => size.value,
+  setPageSize: (value) => { size.value = value }
 })
 
 const reload = () => {
+  page.value = 1
   load()
 }
 
@@ -66,17 +72,18 @@ const categoryMap: Record<string, { label: string; cls: string }> = {
   SERVICE: { label: '服务', cls: 'info' }
 }
 
-const filtered = computed(() => rows.value)
-
 const load = async () => {
   loading.value = true
   try {
     const data = await api.get('/suppliers', {
       keyword: keyword.value || undefined,
       category: category.value || undefined,
-      enabled: enabled.value || undefined
+      enabled: enabled.value || undefined,
+      page: page.value,
+      size: size.value
     })
-    rows.value = Array.isArray(data) ? data : []
+    rows.value = data?.records || []
+    total.value = data?.total || 0
   } finally {
     loading.value = false
   }
@@ -196,26 +203,26 @@ onMounted(async () => {
           placeholder="编码 / 名称 / 联系人"
           clearable
           style="width: 220px"
-          @keyup.enter="load"
+          @keyup.enter="reload"
         />
-        <el-select v-model="category" placeholder="全部类型" clearable style="width: 130px" @change="load">
+        <el-select v-model="category" placeholder="全部类型" clearable style="width: 130px" @change="reload">
           <el-option label="物料" value="MATERIAL" />
           <el-option label="外协" value="OUTSOURCE" />
           <el-option label="服务" value="SERVICE" />
         </el-select>
-        <el-select v-model="enabled" placeholder="全部状态" clearable style="width: 120px" @change="load">
+        <el-select v-model="enabled" placeholder="全部状态" clearable style="width: 120px" @change="reload">
           <el-option label="启用" value="true" />
           <el-option label="停用" value="false" />
         </el-select>
-        <el-button type="primary" plain @click="load">查询</el-button>
+        <el-button type="primary" plain @click="reload">查询</el-button>
         <el-button plain @click="reset">重置</el-button>
         <div class="spacer"></div>
         <TableToolbar :table="table" export-api="/suppliers" export-name="供应商" @applied="reload" />
-        <span class="toolbar-tip">共 {{ filtered.length }} 家供应商</span>
+        <span class="toolbar-tip">共 {{ total }} 家供应商</span>
       </div>
 
       <div class="table-wrap">
-        <DataTable :table="table" :data="filtered" :loading="loading">
+        <DataTable :table="table" :data="rows" :loading="loading">
           <template #cell-code="{ row }"><span class="mono">{{ row.code }}</span></template>
           <template #cell-category="{ row }">
             <span class="status-tag" :class="categoryOf(row.category).cls">
@@ -252,6 +259,18 @@ onMounted(async () => {
             <el-button v-perm="'supplier:save'" link type="danger" @click="remove(row)">删除</el-button>
           </template>
         </DataTable>
+      </div>
+
+      <div class="pager">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="size"
+          :total="total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next"
+          @current-change="load"
+          @size-change="load"
+        />
       </div>
     </div>
 

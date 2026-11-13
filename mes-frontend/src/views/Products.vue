@@ -17,6 +17,9 @@ const customFieldKey = ref('')
 const customFilterValue = ref<any>('')
 const customFieldDefs = ref<any[]>([])
 const customValues = reactive<Record<string, any>>({})
+const page = ref(1)
+const size = ref(20)
+const total = ref(0)
 const router = useRouter()
 
 const baseColumns = [
@@ -49,10 +52,13 @@ const table = useTableView({
     category.value = filters.category || ''
     customFieldKey.value = filters.customFieldKey || ''
     customFilterValue.value = filters.customFilterValue ?? ''
-  }
+  },
+  getPageSize: () => size.value,
+  setPageSize: (value) => { size.value = value }
 })
 
 const reload = () => {
+  page.value = 1
   load()
 }
 
@@ -303,14 +309,17 @@ const flattenRecords = (list: any[]) => list.map(flattenRecord)
 const load = async () => {
   loading.value = true
   try {
-    const records = await api.get('/products', {
+    const data = await api.get('/products', {
       keyword: keyword.value,
       category: category.value,
       customFieldKey: customFieldKey.value || undefined,
       customFieldValue: customFilterValue.value === '' || customFilterValue.value === null
-        ? undefined : customFilterValue.value
+        ? undefined : customFilterValue.value,
+      page: page.value,
+      size: size.value
     })
-    rows.value = flattenRecords(records)
+    rows.value = flattenRecords(data?.records || [])
+    total.value = data?.total || 0
   } finally {
     loading.value = false
   }
@@ -643,8 +652,8 @@ onMounted(async () => {
 
     <div class="panel">
       <div class="filter-bar">
-        <el-input v-model="keyword" placeholder="产品编码 / 名称" clearable style="width: 240px" @keyup.enter="load" />
-        <el-select v-model="category" placeholder="全部类型" clearable style="width: 140px" @change="load">
+        <el-input v-model="keyword" placeholder="产品编码 / 名称" clearable style="width: 240px" @keyup.enter="reload" />
+        <el-select v-model="category" placeholder="全部类型" clearable style="width: 140px" @change="reload">
           <el-option label="成品" value="FINISHED" />
           <el-option label="半成品" value="SEMI" />
           <el-option label="原料" value="RAW" />
@@ -670,7 +679,7 @@ onMounted(async () => {
             :placeholder="`${activeCustomField.label}的值`"
             clearable
             style="width: 150px"
-            @change="load"
+            @change="reload"
           >
             <template v-if="activeCustomField.fieldType === 'SWITCH'">
               <el-option label="是" value="true" />
@@ -690,7 +699,7 @@ onMounted(async () => {
             value-format="YYYY-MM-DD"
             :placeholder="activeCustomField.label"
             style="width: 150px"
-            @change="load"
+            @change="reload"
           />
           <el-input
             v-else
@@ -698,10 +707,10 @@ onMounted(async () => {
             :placeholder="`${activeCustomField.label}的值`"
             clearable
             style="width: 150px"
-            @keyup.enter="load"
+            @keyup.enter="reload"
           />
         </template>
-        <el-button type="primary" plain @click="load">查询</el-button>
+        <el-button type="primary" plain @click="reload">查询</el-button>
         <div class="spacer"></div>
         <TableToolbar
           :table="table"
@@ -710,7 +719,7 @@ onMounted(async () => {
           :export-transform="flattenRecords"
           @applied="reload"
         />
-        <span class="toolbar-tip">共 {{ rows.length }} 个产品</span>
+        <span class="toolbar-tip">共 {{ total }} 个产品</span>
       </div>
       <div class="table-wrap">
         <DataTable :table="table" :data="rows" :loading="loading">
@@ -747,6 +756,18 @@ onMounted(async () => {
             <el-button link type="danger" @click="remove(row)">删除</el-button>
           </template>
         </DataTable>
+      </div>
+
+      <div class="pager">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="size"
+          :total="total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next"
+          @current-change="load"
+          @size-change="load"
+        />
       </div>
     </div>
 

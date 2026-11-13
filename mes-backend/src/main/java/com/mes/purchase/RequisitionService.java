@@ -131,6 +131,37 @@ public class RequisitionService implements RequisitionPort {
         return new PageResult(records, total == null ? 0 : total, page, size);
     }
 
+    /** 引用选择专用：采购申请下拉只返回单号、用途与状态，status 支持逗号分隔多个 */
+    public List<Map<String, Object>> options(String keyword, String status, int limit) {
+        int size = Math.max(1, Math.min(limit, 50));
+        String like = "%" + (keyword == null ? "" : keyword.trim()) + "%";
+        List<Object> args = new ArrayList<>(List.of(like, like));
+        StringBuilder where = new StringBuilder(
+                " where (r.req_no ilike ? or coalesce(r.purpose, '') ilike ?) ");
+        List<String> statuses = splitStatus(status);
+        if (!statuses.isEmpty()) {
+            where.append(" and r.status in (")
+                    .append(String.join(",", java.util.Collections.nCopies(statuses.size(), "?")))
+                    .append(") ");
+            args.addAll(statuses);
+        }
+        orgScope.appendScope(where, args, "r.factory_org_id");
+        args.add(size);
+        return jdbcTemplate.queryForList("""
+                select r.id, r.req_no as "reqNo", r.purpose, r.status,
+                       r.source_type as "sourceType"
+                from purchase_requisition r
+                """ + where + " order by r.id desc limit ?", args.toArray());
+    }
+
+    private static List<String> splitStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return List.of();
+        }
+        return java.util.Arrays.stream(status.split(","))
+                .map(String::trim).filter(item -> !item.isEmpty()).toList();
+    }
+
     public Map<String, Object> summary() {
         return jdbcTemplate.queryForMap("""
                 select count(*) filter (where status = 'SUBMITTED') as "pending",

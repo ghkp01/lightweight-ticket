@@ -17,6 +17,9 @@ const router = useRouter()
 
 const loading = ref(false)
 const rows = ref<any[]>([])
+const page = ref(1)
+const size = ref(20)
+const total = ref(0)
 const summary = ref<{ unread: number; total: number }>({ unread: 0, total: 0 })
 const category = ref('ALL')
 const unreadOnly = ref(false)
@@ -76,18 +79,30 @@ const emptyText = computed(() => {
   return category.value === 'ALL' ? '暂无消息' : '这个分类下还没有消息'
 })
 
+const reload = () => {
+  page.value = 1
+  load()
+}
+
+const changePage = (value: number) => {
+  page.value = value
+  load()
+}
+
 const load = async () => {
   loading.value = true
   try {
-    const [list, sum] = await Promise.all([
+    const [data, sum] = await Promise.all([
       api.get('/notices', {
         category: category.value === 'ALL' ? undefined : category.value,
         unreadOnly: unreadOnly.value || undefined,
-        limit: 100
+        page: page.value,
+        size: size.value
       }),
       api.get('/notices/summary')
     ])
-    rows.value = list || []
+    rows.value = data?.records || []
+    total.value = data?.total || 0
     summary.value = sum || { unread: 0, total: 0 }
   } finally {
     loading.value = false
@@ -99,8 +114,9 @@ const readNotice = async (item: any) => {
   await api.put(`/notices/${item.id}/read`)
   item.readAt = '已读'
   summary.value = { ...summary.value, unread: Math.max(0, Number(summary.value.unread || 0) - 1) }
+  // 只看未读时读掉一条要从当前页补位，避免出现空行与总数不一致
   if (unreadOnly.value) {
-    rows.value = rows.value.filter((row: any) => row.id !== item.id)
+    await load()
   }
 }
 
@@ -162,15 +178,15 @@ onMounted(async () => {
       </div>
 
       <div class="filter-bar">
-        <el-radio-group v-model="category" size="small" @change="load">
+        <el-radio-group v-model="category" size="small" @change="reload">
           <el-radio-button v-for="item in CATEGORY" :key="item.value" :label="item.value">
             {{ item.label }}
           </el-radio-button>
         </el-radio-group>
-        <el-checkbox v-model="unreadOnly" label="只看未读" border size="small" @change="load" />
+        <el-checkbox v-model="unreadOnly" label="只看未读" border size="small" @change="reload" />
         <el-button size="small" @click="load">刷新</el-button>
         <div class="spacer"></div>
-        <span class="toolbar-tip">未读 {{ summary.unread }} 条 · 共 {{ summary.total }} 条</span>
+        <span class="toolbar-tip">未读 {{ summary.unread }} 条 · 当前筛选 {{ total }} 条</span>
       </div>
 
       <div v-if="pushInfo && !pushInfo.enabled" class="push-tip">
@@ -205,6 +221,18 @@ onMounted(async () => {
           </div>
         </div>
         <el-empty v-if="!loading && !rows.length" :description="emptyText" />
+      </div>
+
+      <div class="pager">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="size"
+          :total="total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next"
+          @current-change="changePage"
+          @size-change="load"
+        />
       </div>
     </div>
   </div>

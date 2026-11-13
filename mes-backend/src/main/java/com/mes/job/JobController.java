@@ -30,7 +30,12 @@ public class JobController {
 
     @GetMapping("/logs")
     public ApiResponse logs(@RequestParam(required = false) String code,
-                            @RequestParam(defaultValue = "50") int limit) {
+                            @RequestParam(defaultValue = "50") int limit,
+                            @RequestParam(required = false) Integer page,
+                            @RequestParam(required = false) Integer size) {
+        if (page != null) {
+            return ApiResponse.ok(service.logsPage(code, page, size == null ? 20 : size));
+        }
         return ApiResponse.ok(service.logs(code, limit));
     }
 

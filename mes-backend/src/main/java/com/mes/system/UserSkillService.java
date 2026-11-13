@@ -106,22 +106,41 @@ public class UserSkillService implements UserSkillPort {
     /** 按工序列出持证人员，派工选人用 */
     @Override
     public List<SkillUser> candidates(Long processId) {
+        return candidates(processId, null, null);
+    }
+
+    /** 持证人员远程搜索：按姓名/账号过滤，limit 为空时返回全部 */
+    @Override
+    public List<SkillUser> candidates(Long processId, String keyword, Integer limit) {
         if (processId == null) {
             return new ArrayList<>();
         }
-        return jdbcTemplate.query("""
+        StringBuilder sql = new StringBuilder("""
                 select u.id, u.username, u.real_name as "realName", u.org_id as "orgId",
                        o.name as "orgName", u.position, s.level
                 from user_skill s
                 join sys_user u on u.id = s.user_id
                 left join sys_org o on o.id = u.org_id
                 where s.process_id = ? and u.enabled = true
-                order by coalesce(o.sort, 999), u.id
-                """, (rs, rowNum) -> new SkillUser(
+                """);
+        List<Object> args = new ArrayList<>();
+        args.add(processId);
+        if (keyword != null && !keyword.isBlank()) {
+            sql.append(" and (u.real_name ilike ? or u.username ilike ?) ");
+            String like = "%" + keyword.trim() + "%";
+            args.add(like);
+            args.add(like);
+        }
+        sql.append(" order by coalesce(o.sort, 999), u.id ");
+        if (limit != null && limit > 0) {
+            sql.append(" limit ? ");
+            args.add(Math.min(limit, 50));
+        }
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new SkillUser(
                 rs.getLong("id"), rs.getString("username"), rs.getString("realName"),
                 rs.getObject("orgId") == null ? null : rs.getLong("orgId"),
                 rs.getString("orgName"), rs.getString("position"), rs.getString("level")),
-                processId);
+                args.toArray());
     }
 
     /** 给一批用户补技能标记，供派工下拉展示 */

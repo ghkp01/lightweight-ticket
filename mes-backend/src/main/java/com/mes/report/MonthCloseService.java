@@ -103,6 +103,81 @@ public class MonthCloseService {
         return result;
     }
 
+    /** 库存月结明细分页：汇总仍按整月全部物料统计，明细按页返回 */
+    public Map<String, Object> stockClosePage(String month, int page, int size) {
+        String period = normalizeMonth(month);
+        int safePage = Math.max(1, page);
+        int safeSize = Math.max(1, Math.min(size, 200));
+        String baseCte = """
+                with base as (
+                    select t.product_id, t.warehouse_id,
+                           sum(case when t.created_at < to_date(?, 'YYYY-MM-DD') then t.qty else 0 end) as open_qty,
+                           sum(case when t.created_at < to_date(?, 'YYYY-MM-DD') then t.amount else 0 end) as open_amount,
+                           sum(case when t.created_at >= to_date(?, 'YYYY-MM-DD') and t.qty > 0 then t.qty else 0 end) as in_qty,
+                           sum(case when t.created_at >= to_date(?, 'YYYY-MM-DD') and t.qty > 0 then t.amount else 0 end) as in_amount,
+                           sum(case when t.created_at >= to_date(?, 'YYYY-MM-DD') and t.qty < 0 then -t.qty else 0 end) as out_qty,
+                           sum(case when t.created_at >= to_date(?, 'YYYY-MM-DD') and t.qty < 0 then -t.amount else 0 end) as out_amount
+                    from rm_stock_txn t
+                    where t.created_at < to_date(?, 'YYYY-MM-DD') + interval '1 month'
+                    group by t.product_id, t.warehouse_id
+                )
+                """;
+        Object[] dateArgs = new Object[]{period + "-01", period + "-01", period + "-01",
+                period + "-01", period + "-01", period + "-01", period + "-01"};
+        Map<String, Object> totals = jdbcTemplate.queryForMap(baseCte + """
+                select count(*) as "rows",
+                       coalesce(sum(b.open_qty), 0) as "openQty",
+                       coalesce(sum(b.in_qty), 0) as "inQty",
+                       coalesce(sum(b.out_qty), 0) as "outQty",
+                       coalesce(sum(b.open_amount), 0) as "openAmount",
+                       coalesce(sum(b.in_amount), 0) as "inAmount",
+                       coalesce(sum(b.out_amount), 0) as "outAmount"
+                from base b
+                where b.open_qty <> 0 or b.in_qty <> 0 or b.out_qty <> 0
+                """, dateArgs);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(baseCte + """
+                select p.code as "productCode", p.name as "productName", p.unit,
+                       w.name as "warehouseName",
+                       round(b.open_qty, 4) as "openQty", round(b.open_amount, 2) as "openAmount",
+                       round(b.in_qty, 4) as "inQty", round(b.in_amount, 2) as "inAmount",
+                       round(b.out_qty, 4) as "outQty", round(b.out_amount, 2) as "outAmount",
+                       round(b.open_qty + b.in_qty - b.out_qty, 4) as "closeQty",
+                       round(b.open_amount + b.in_amount - b.out_amount, 2) as "closeAmount"
+                from base b
+                join rm_product p on p.id = b.product_id
+                join rm_warehouse w on w.id = b.warehouse_id
+                where b.open_qty <> 0 or b.in_qty <> 0 or b.out_qty <> 0
+                order by w.id, p.code
+                limit ? offset ?
+                """, period + "-01", period + "-01", period + "-01",
+                period + "-01", period + "-01", period + "-01", period + "-01",
+                safeSize, (long) (safePage - 1) * safeSize);
+
+        BigDecimal openQty = decimal(totals.get("openQty"));
+        BigDecimal inQty = decimal(totals.get("inQty"));
+        BigDecimal outQty = decimal(totals.get("outQty"));
+        BigDecimal closeAmount = decimal(totals.get("openAmount"))
+                .add(decimal(totals.get("inAmount")))
+                .subtract(decimal(totals.get("outAmount")));
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("rows", ((Number) totals.get("rows")).intValue());
+        summary.put("openQty", openQty);
+        summary.put("inQty", inQty);
+        summary.put("outQty", outQty);
+        summary.put("closeQty", openQty.add(inQty).subtract(outQty));
+        summary.put("closeAmount", closeAmount.setScale(2, RoundingMode.HALF_UP));
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("month", period);
+        result.put("periodStart", period + "-01");
+        result.put("summary", summary);
+        result.put("rows", rows);
+        result.put("total", summary.get("rows"));
+        result.put("page", safePage);
+        result.put("size", safeSize);
+        return result;
+    }
+
     /** 往来月结：采购 / 应付与销售 / 应收 */
     public Map<String, Object> settlement(String month) {
         String period = normalizeMonth(month);

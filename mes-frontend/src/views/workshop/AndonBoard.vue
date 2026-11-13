@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api } from '../../api'
+import ReferenceSelect from '../../components/ReferenceSelect.vue'
 
 const REFRESH_MS = 30000
 const OVERDUE_MINUTES = 30
@@ -19,13 +20,6 @@ const STATUS_MAP: Record<string, { label: string; cls: string }> = {
   ACKED: { label: '处理中', cls: 'warning' },
   RESOLVED: { label: '已解决', cls: 'success' }
 }
-
-const WORK_STATUS: Record<string, string> = {
-  SCHEDULED: '已排产',
-  RELEASED: '已下达',
-  IN_PROGRESS: '生产中'
-}
-const CALLABLE_STATUS = ['SCHEDULED', 'RELEASED', 'IN_PROGRESS']
 
 const pad = (value: number) => String(value).padStart(2, '0')
 
@@ -44,8 +38,6 @@ let timer: number | undefined
 
 const dialogVisible = ref(false)
 const saving = ref(false)
-const workOrders = ref<any[]>([])
-const workOrderLoading = ref(false)
 const operationOptions = ref<any[]>([])
 const operationLoading = ref(false)
 const form = reactive<any>({ workOrderId: null, operationName: '', type: 'MATERIAL', description: '' })
@@ -126,22 +118,10 @@ const load = async () => {
   }
 }
 
-const loadWorkOrders = async () => {
-  workOrderLoading.value = true
-  try {
-    const data = await api.get('/work-orders', { page: 1, size: 100 })
-    const records = Array.isArray(data) ? data : data?.records || []
-    workOrders.value = records.filter((item: any) => CALLABLE_STATUS.includes(item.status))
-  } finally {
-    workOrderLoading.value = false
-  }
-}
-
 const openCreate = async () => {
   Object.assign(form, { workOrderId: null, operationName: '', type: 'MATERIAL', description: '' })
   operationOptions.value = []
   dialogVisible.value = true
-  if (!workOrders.value.length) await loadWorkOrders()
 }
 
 const onWorkOrderChange = async (id: any) => {
@@ -378,21 +358,15 @@ onUnmounted(() => {
     <el-dialog draggable append-to-body v-model="dialogVisible" title="呼叫异常" width="560px">
       <el-form label-position="top">
         <el-form-item label="工单" required>
-          <el-select
+          <ReferenceSelect
             v-model="form.workOrderId"
-            filterable
-            :loading="workOrderLoading"
-            placeholder="选择已排产 / 已下达 / 生产中的工单"
-            style="width: 100%"
-            @change="onWorkOrderChange"
-          >
-            <el-option
-              v-for="item in workOrders"
-              :key="item.id"
-              :label="`${item.workNo} · ${item.productName}（${WORK_STATUS[item.status] || item.status}）`"
-              :value="item.id"
-            />
-          </el-select>
+            url="/work-orders/options"
+            :params="{ status: 'SCHEDULED,RELEASED,IN_PROGRESS' }"
+            code-field="workNo"
+            label-field="productName"
+            placeholder="输入工单号或产品搜索（已排产/已下达/生产中）"
+            @select="(work) => onWorkOrderChange(work ? work.id : null)"
+          />
         </el-form-item>
         <el-form-item label="工序">
           <el-select

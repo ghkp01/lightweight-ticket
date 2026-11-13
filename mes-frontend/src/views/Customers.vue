@@ -9,6 +9,9 @@ import { useTableView } from '../composables/useTableView'
 const loading = ref(false)
 const rows = ref<any[]>([])
 const keyword = ref('')
+const page = ref(1)
+const size = ref(20)
+const total = ref(0)
 
 // 表格视图：列显示 / 冻结 / 列宽与默认筛选按账号保存
 const table = useTableView({
@@ -26,10 +29,13 @@ const table = useTableView({
   getFilters: () => ({ keyword: keyword.value }),
   setFilters: (filters) => {
     keyword.value = filters.keyword || ''
-  }
+  },
+  getPageSize: () => size.value,
+  setPageSize: (value) => { size.value = value }
 })
 
 const reload = () => {
+  page.value = 1
   load()
 }
 
@@ -41,7 +47,13 @@ const saving = ref(false)
 const load = async () => {
   loading.value = true
   try {
-    rows.value = await api.get('/customers', { keyword: keyword.value })
+    const data = await api.get('/customers', {
+      keyword: keyword.value,
+      page: page.value,
+      size: size.value
+    })
+    rows.value = data?.records || []
+    total.value = data?.total || 0
   } finally {
     loading.value = false
   }
@@ -118,11 +130,11 @@ onMounted(async () => {
 
     <div class="panel">
       <div class="filter-bar">
-        <el-input v-model="keyword" placeholder="客户编码 / 名称 / 联系人" clearable style="width: 260px" @keyup.enter="load" />
-        <el-button type="primary" plain @click="load">查询</el-button>
+        <el-input v-model="keyword" placeholder="客户编码 / 名称 / 联系人" clearable style="width: 260px" @keyup.enter="reload" />
+        <el-button type="primary" plain @click="reload">查询</el-button>
         <div class="spacer"></div>
         <TableToolbar :table="table" export-api="/customers" export-name="客户列表" @applied="reload" />
-        <span class="toolbar-tip">共 {{ rows.length }} 家客户</span>
+        <span class="toolbar-tip">共 {{ total }} 家客户</span>
       </div>
       <div class="table-wrap">
         <DataTable :table="table" :data="rows" :loading="loading">
@@ -136,6 +148,18 @@ onMounted(async () => {
             <el-button link type="danger" @click="remove(row)">删除</el-button>
           </template>
         </DataTable>
+      </div>
+
+      <div class="pager">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="size"
+          :total="total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next"
+          @current-change="load"
+          @size-change="load"
+        />
       </div>
     </div>
 

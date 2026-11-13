@@ -31,7 +31,12 @@ public class BomController {
 
     @GetMapping
     public ApiResponse list(@RequestParam(required = false) String keyword,
-                            @RequestParam(required = false) String status) {
+                            @RequestParam(required = false) String status,
+                            @RequestParam(required = false) Integer page,
+                            @RequestParam(defaultValue = "20") int size) {
+        if (page != null) {
+            return ApiResponse.ok(service.page(keyword, status, page, size));
+        }
         return ApiResponse.ok(service.list(keyword, status));
     }
 

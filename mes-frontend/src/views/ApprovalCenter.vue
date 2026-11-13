@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import StatusTag from '../components/StatusTag.vue'
+import ReferenceSelect from '../components/ReferenceSelect.vue'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
@@ -13,8 +14,13 @@ const canConfig = computed(() => auth.can('system_approval'))
 const tab = ref('tasks')
 const loading = ref(false)
 const tasks = ref<any[]>([])
+const tasksTotal = ref(0)
+const tasksPage = ref(1)
+const tasksSize = ref(20)
 const mine = ref<any[]>([])
 const mineTotal = ref(0)
+const minePage = ref(1)
+const mineSize = ref(20)
 const flows = ref<any[]>([])
 
 const actionDialog = ref(false)
@@ -23,18 +29,12 @@ const actionTask = ref<any>(null)
 const actionComment = ref('')
 const acting = ref(false)
 
-const people = ref<any[]>([])
 const forwardDialog = ref(false)
 const forwardMode = ref<'transfer' | 'addSign'>('transfer')
 const forwardTask = ref<any>(null)
 const forwardUser = ref('')
 const forwardComment = ref('')
 const forwarding = ref(false)
-
-const loadPeople = async () => {
-  if (people.value.length) return
-  people.value = (await api.get('/approvals/assignees')) || []
-}
 
 const openForward = async (task: any, mode: 'transfer' | 'addSign' | 'rollback') => {
   if (mode === 'rollback') {
@@ -46,7 +46,6 @@ const openForward = async (task: any, mode: 'transfer' | 'addSign' | 'rollback')
   forwardUser.value = ''
   forwardComment.value = ''
   forwardDialog.value = true
-  await loadPeople()
 }
 
 const submitForward = async () => {
@@ -63,7 +62,7 @@ const submitForward = async () => {
     })
     ElMessage.success(result?.message || '已提交')
     forwardDialog.value = false
-    await loadTasks()
+    await refreshTasks()
   } finally {
     forwarding.value = false
   }
@@ -86,7 +85,7 @@ const openErrorAction = async (row: any, kind: 'approveExtra' | 'rejectExtra') =
       comment: String(value || '').trim() || undefined
     })
     ElMessage.success(isReject ? '已退回，审批结束' : '已确认，等原审批人继续')
-    await loadTasks()
+    await refreshTasks()
   } catch (error) {
     // 取消输入
   }
@@ -131,21 +130,54 @@ const nodeSummary = (node: any) => {
 const loadTasks = async () => {
   loading.value = true
   try {
-    tasks.value = (await api.get('/approvals/tasks')) || []
+    const data = await api.get('/approvals/tasks', {
+      page: tasksPage.value,
+      size: tasksSize.value
+    })
+    tasks.value = data?.records || []
+    tasksTotal.value = data?.total || 0
   } finally {
     loading.value = false
+  }
+}
+
+const changeTasksPage = (value: number) => {
+  tasksPage.value = value
+  loadTasks()
+}
+
+const changeTasksSize = () => {
+  tasksPage.value = 1
+  loadTasks()
+}
+
+/** 处理完一条待办后刷新：当前页空了就回上一页，避免停在空列表 */
+const refreshTasks = async () => {
+  await loadTasks()
+  if (!tasks.value.length && tasksPage.value > 1) {
+    tasksPage.value -= 1
+    await loadTasks()
   }
 }
 
 const loadMine = async () => {
   loading.value = true
   try {
-    const data = await api.get('/approvals/instances', { mine: true, page: 1, size: 100 })
+    const data = await api.get('/approvals/instances', {
+      mine: true,
+      page: minePage.value,
+      size: mineSize.value
+    })
     mine.value = data.records || []
     mineTotal.value = data.total || 0
   } finally {
     loading.value = false
   }
+}
+
+const changeMinePage = (value: number) => {
+  minePage.value = value
+  loadMine()
 }
 
 const loadFlows = async () => {
@@ -275,7 +307,7 @@ const submitAction = async () => {
       ElMessage.success(actionMode.value === 'approve' ? '已通过' : '已驳回')
     }
     actionDialog.value = false
-    await loadTasks()
+    await refreshTasks()
   } finally {
     acting.value = false
   }
@@ -314,7 +346,7 @@ const submitRollback = async () => {
     })
     ElMessage.success(result?.message || '已回退')
     rollbackDialog.value = false
-    await loadTasks()
+    await refreshTasks()
   } finally {
     rollingBack.value = false
   }
@@ -338,7 +370,7 @@ const switchTab = (name: string) => {
   else loadFlows()
 }
 
-const pendingCount = computed(() => tasks.value.length)
+const pendingCount = computed(() => tasksTotal.value)
 
 onMounted(async () => {
   await loadTasks()
@@ -407,6 +439,17 @@ onMounted(async () => {
               </template>
             </el-table-column>
           </el-table>
+          <div class="pager">
+            <el-pagination
+              v-model:current-page="tasksPage"
+              v-model:page-size="tasksSize"
+              :total="tasksTotal"
+              :page-sizes="[10, 20, 50, 100]"
+              layout="total, sizes, prev, pager, next"
+              @current-change="changeTasksPage"
+              @size-change="changeTasksSize"
+            />
+          </div>
         </div>
       </el-tab-pane>
 
@@ -443,7 +486,18 @@ onMounted(async () => {
               </template>
             </el-table-column>
           </el-table>
-          <div class="table-tip">共 {{ mineTotal }} 条记录，撤回后业务单据回到草稿状态。</div>
+          <div class="table-tip">撤回后业务单据回到草稿状态。</div>
+          <div class="pager">
+            <el-pagination
+              v-model:current-page="minePage"
+              v-model:page-size="mineSize"
+              :total="mineTotal"
+              :page-sizes="[10, 20, 50, 100]"
+              layout="total, sizes, prev, pager, next"
+              @current-change="changeMinePage"
+              @size-change="loadMine"
+            />
+          </div>
         </div>
       </el-tab-pane>
 
@@ -506,14 +560,14 @@ onMounted(async () => {
           ? '转交后这条待办只由对方处理，你不再收到该节点待办。'
           : '加签后你这条待办要等对方确认后才能通过；对方不同意则整单驳回。' }}
       </p>
-      <el-select v-model="forwardUser" filterable placeholder="选择处理人" style="width: 100%">
-        <el-option
-          v-for="person in people"
-          :key="person.username"
-          :label="`${person.realName}（${person.username} · ${roleLabel[person.role] || person.role}）`"
-          :value="person.username"
-        />
-      </el-select>
+      <ReferenceSelect
+        v-model="forwardUser"
+        url="/approvals/assignees"
+        value-field="username"
+        code-field="username"
+        label-field="realName"
+        placeholder="输入姓名或账号搜索"
+      />
       <el-input
         v-model="forwardComment"
         type="textarea"

@@ -71,7 +71,7 @@ public class WorkOrderUnitService {
         return count;
     }
 
-    /** 工单维度的件列表、位置分布与汇总 */
+    /** 工单维度的件列表、位置分布与汇总（不分页，保留给旧调用） */
     public Map<String, Object> listByWorkOrder(long workOrderId) {
         List<Map<String, Object>> units = jdbcTemplate.queryForList("""
                 select u.id, u.unit_no as "unitNo", u.seq_no as "seqNo", u.status,
@@ -133,7 +133,112 @@ public class WorkOrderUnitService {
         return result;
     }
 
-    /** 跨工单的件列表：按件码 / 工单号 / 产品搜，按状态与当前工序筛，车间和计划都用这一页找件 */
+    /**
+     * 工单维度的件列表（服务端分页）。
+     * 汇总与位置分布按全量聚合，件明细只回当前页，位置分布每种最多带 20 个件码，避免大工单一次传几千行。
+     */
+    public Map<String, Object> listByWorkOrder(long workOrderId, int page, int size) {
+        List<Map<String, Object>> statusRows = jdbcTemplate.queryForList("""
+                select status, count(*) as cnt
+                from work_order_unit where work_order_id = ?
+                group by status
+                """, workOrderId);
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("total", 0);
+        summary.put("pending", 0L);
+        summary.put("inProgress", 0L);
+        summary.put("finished", 0L);
+        summary.put("scrapped", 0L);
+        long all = 0;
+        for (Map<String, Object> row : statusRows) {
+            long cnt = ((Number) row.get("cnt")).longValue();
+            all += cnt;
+            switch (String.valueOf(row.get("status"))) {
+                case "PENDING" -> summary.put("pending", cnt);
+                case "IN_PROGRESS" -> summary.put("inProgress", cnt);
+                case "FINISHED" -> summary.put("finished", cnt);
+                case "SCRAPPED" -> summary.put("scrapped", cnt);
+                default -> {
+                }
+            }
+        }
+        summary.put("total", all);
+
+        List<Map<String, Object>> distribution = new ArrayList<>();
+        for (Map<String, Object> row : jdbcTemplate.queryForList("""
+                with ranked as (
+                    select case
+                               when u.status = 'FINISHED' then 'done'
+                               when u.status = 'SCRAPPED' then 'scrapped'
+                               when u.current_operation_seq is null then 'waiting'
+                               else 'op-' || u.current_operation_seq
+                           end as bucket_key,
+                           case
+                               when u.status = 'FINISHED' then '已完工'
+                               when u.status = 'SCRAPPED' then '已报废'
+                               when u.current_operation_seq is null then '待投产'
+                               else coalesce(o.name, '工序' || u.current_operation_seq)
+                           end as bucket_label,
+                           u.unit_no, u.seq_no
+                    from work_order_unit u
+                    left join work_order_operation o on o.id = u.current_operation_id
+                    where u.work_order_id = ?
+                ),
+                buckets as (
+                    select bucket_key, bucket_label, count(*) as cnt, min(seq_no) as first_seq
+                    from ranked group by bucket_key, bucket_label
+                ),
+                codes as (
+                    select bucket_key, bucket_label,
+                           string_agg(unit_no, '、' order by seq_no) as unit_codes
+                    from (
+                        select ranked.*, row_number() over (partition by bucket_key order by seq_no) as rn
+                        from ranked
+                    ) t
+                    where rn <= 20
+                    group by bucket_key, bucket_label
+                )
+                select b.bucket_key, b.bucket_label, b.cnt, c.unit_codes
+                from buckets b
+                join codes c on c.bucket_key = b.bucket_key and c.bucket_label = b.bucket_label
+                order by b.first_seq
+                """, workOrderId)) {
+            Map<String, Object> bucket = new LinkedHashMap<>();
+            bucket.put("key", row.get("bucket_key"));
+            bucket.put("label", row.get("bucket_label"));
+            bucket.put("count", row.get("cnt"));
+            String codes = row.get("unit_codes") == null ? "" : String.valueOf(row.get("unit_codes"));
+            bucket.put("units", codes.isEmpty() ? List.of() : List.of(codes.split("、")));
+            distribution.add(bucket);
+        }
+
+        List<Object> args = new ArrayList<>(List.of(workOrderId, size, (page - 1) * size));
+        List<Map<String, Object>> units = jdbcTemplate.queryForList("""
+                select u.id, u.unit_no as "unitNo", u.seq_no as "seqNo", u.status,
+                       u.current_operation_seq as "currentOperationSeq",
+                       o.name as "currentOperationName",
+                       u.last_action_at as "lastActionAt",
+                       to_char(u.last_action_at, 'MM-DD HH24:MI') as "lastActionText",
+                       (select l.worker from work_order_unit_log l
+                        where l.unit_id = u.id order by l.id desc limit 1) as "lastWorker"
+                from work_order_unit u
+                left join work_order_operation o on o.id = u.current_operation_id
+                where u.work_order_id = ?
+                order by u.seq_no
+                limit ? offset ?
+                """, args.toArray());
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("units", units);
+        result.put("summary", summary);
+        result.put("distribution", distribution);
+        result.put("total", all);
+        result.put("page", page);
+        result.put("size", size);
+        return result;
+    }
+
+
     public Map<String, Object> search(String keyword, String status, Integer operationSeq, int page, int size) {
         String like = "%" + (keyword == null ? "" : keyword.trim()) + "%";
         StringBuilder where = new StringBuilder("""

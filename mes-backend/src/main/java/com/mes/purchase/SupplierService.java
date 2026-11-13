@@ -2,6 +2,7 @@ package com.mes.purchase;
 
 import com.mes.common.BizException;
 import com.mes.common.CodeGenerator;
+import com.mes.common.PageResult;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -52,7 +53,32 @@ public class SupplierService {
     }
 
     public List<Map<String, Object>> list(String keyword, String category, String enabled) {
-        StringBuilder sql = new StringBuilder("""
+        java.util.List<Object> args = new java.util.ArrayList<>();
+        StringBuilder where = where(keyword, category, enabled, args);
+        return jdbcTemplate.queryForList(supplierSelect() + where + " order by s.enabled desc, s.id",
+                args.toArray());
+    }
+
+    /** 供应商列表分页：供应商会持续增加，列表页改为后端分页 */
+    public PageResult page(String keyword, String category, String enabled, int page, int size) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 200);
+        java.util.List<Object> countArgs = new java.util.ArrayList<>();
+        StringBuilder where = where(keyword, category, enabled, countArgs);
+        Long total = jdbcTemplate.queryForObject(
+                "select count(*) from supplier s " + where, Long.class, countArgs.toArray());
+        java.util.List<Object> args = new java.util.ArrayList<>();
+        StringBuilder pageWhere = where(keyword, category, enabled, args);
+        args.add(safeSize);
+        args.add((safePage - 1) * safeSize);
+        List<Map<String, Object>> records = jdbcTemplate.queryForList(
+                supplierSelect() + pageWhere + " order by s.enabled desc, s.id limit ? offset ?",
+                args.toArray());
+        return new PageResult(records, total == null ? 0 : total, safePage, safeSize);
+    }
+
+    private String supplierSelect() {
+        return """
                 select s.id, s.code, s.name, s.category, s.contact, s.phone, s.email, s.address,
                        s.tax_no as "taxNo", s.payment_term as "paymentTerm", s.credit_days as "creditDays",
                        s.lead_days as "leadDays",
@@ -62,20 +88,25 @@ public class SupplierService {
                           where o.supplier_id = s.id and o.status <> 'CANCELLED') as "lastOrderDate",
                        to_char(s.created_at, 'YYYY-MM-DD') as "createdAt"
                 from supplier s
-                where (s.code ilike ? or s.name ilike ? or coalesce(s.contact, '') ilike ?)
-                """);
+                """;
+    }
+
+    private StringBuilder where(String keyword, String category, String enabled, java.util.List<Object> args) {
         String like = "%" + (keyword == null ? "" : keyword.trim()) + "%";
-        java.util.List<Object> args = new java.util.ArrayList<>(List.of(like, like, like));
+        StringBuilder where = new StringBuilder(
+                " where (s.code ilike ? or s.name ilike ? or coalesce(s.contact, '') ilike ?) ");
+        args.add(like);
+        args.add(like);
+        args.add(like);
         if (category != null && !category.isBlank()) {
-            sql.append(" and s.category = ?");
+            where.append(" and s.category = ?");
             args.add(category.trim().toUpperCase(Locale.ROOT));
         }
         if ("true".equalsIgnoreCase(enabled) || "false".equalsIgnoreCase(enabled)) {
-            sql.append(" and s.enabled = ?");
+            where.append(" and s.enabled = ?");
             args.add(Boolean.parseBoolean(enabled));
         }
-        sql.append(" order by s.enabled desc, s.id");
-        return jdbcTemplate.queryForList(sql.toString(), args.toArray());
+        return where;
     }
 
     public List<Map<String, Object>> options() {

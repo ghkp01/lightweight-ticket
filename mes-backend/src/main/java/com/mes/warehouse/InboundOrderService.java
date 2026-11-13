@@ -114,6 +114,38 @@ public class InboundOrderService implements InboundOrderPort {
         return new PageResult(records, total == null ? 0 : total, page, size);
     }
 
+    /** 引用选择专用：入库单下拉只返回单号、供应商、状态与数量，status 支持逗号分隔多个 */
+    public List<Map<String, Object>> options(String keyword, String status, int limit) {
+        int size = Math.max(1, Math.min(limit, 50));
+        String like = "%" + (keyword == null ? "" : keyword.trim()) + "%";
+        List<Object> args = new ArrayList<>(List.of(like, like));
+        StringBuilder where = new StringBuilder(
+                " where (o.inbound_no ilike ? or coalesce(o.supplier, '') ilike ?) ");
+        List<String> statuses = splitStatus(status);
+        if (!statuses.isEmpty()) {
+            where.append(" and o.status in (")
+                    .append(String.join(",", java.util.Collections.nCopies(statuses.size(), "?")))
+                    .append(") ");
+            args.addAll(statuses);
+        }
+        MasterDataViews.appendWarehouseScope(orgScope, masterData, where, args, "o.warehouse_id");
+        args.add(size);
+        return jdbcTemplate.queryForList("""
+                select o.id, o.inbound_no as "inboundNo", o.supplier, o.status,
+                       (select coalesce(sum(i.qty), 0) from inbound_order_item i
+                         where i.inbound_id = o.id) as "totalQty"
+                from inbound_order o
+                """ + where + " order by o.id desc limit ?", args.toArray());
+    }
+
+    private static List<String> splitStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return List.of();
+        }
+        return java.util.Arrays.stream(status.split(","))
+                .map(String::trim).filter(item -> !item.isEmpty()).toList();
+    }
+
     /** 入库异常概览：待检、本月无单入库、本月采购退货 */
     public Map<String, Object> summary() {
         Map<String, Object> result = new LinkedHashMap<>(jdbcTemplate.queryForMap("""

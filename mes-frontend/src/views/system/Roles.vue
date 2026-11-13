@@ -9,6 +9,9 @@ import { useTableView } from '../../composables/useTableView'
 const loading = ref(false)
 const rows = ref<any[]>([])
 const catalog = ref<any[]>([])
+const total = ref(0)
+const page = ref(1)
+const size = ref(20)
 
 // 表格视图：列显示 / 冻结 / 列宽按账号保存
 const table = useTableView({
@@ -25,7 +28,10 @@ const table = useTableView({
   ]
 })
 
-const reload = () => load()
+const reload = () => {
+  page.value = 1
+  load()
+}
 
 const drawer = ref(false)
 const editingId = ref<number | null>(null)
@@ -54,10 +60,20 @@ const scopeMap: Record<string, string> = {
 const load = async () => {
   loading.value = true
   try {
-    rows.value = await api.get('/system/roles')
+    const data = await api.get('/system/roles', {
+      page: page.value,
+      size: size.value
+    })
+    rows.value = data?.records || []
+    total.value = data?.total || 0
   } finally {
     loading.value = false
   }
+}
+
+const changePage = (value: number) => {
+  page.value = value
+  load()
 }
 
 const loadCatalog = async () => {
@@ -165,11 +181,19 @@ onMounted(async () => {
         <span class="toolbar-tip">内置角色不可删除；接口权限保存后立即生效，页面按钮需刷新或重新登录</span>
         <div class="spacer"></div>
         <TableToolbar :table="table" export-api="/system/roles" export-name="角色" @applied="reload" />
-        <span class="toolbar-tip">共 {{ rows.length }} 个角色</span>
+        <span class="toolbar-tip">共 {{ total }} 个角色</span>
       </div>
 
       <div class="table-wrap">
-        <DataTable :table="table" :data="rows" :loading="loading">
+        <DataTable
+          :table="table"
+          :data="rows"
+          :loading="loading"
+          :total="total"
+          :page="page"
+          :size="size"
+          @page-change="changePage"
+        >
           <template #cell-code="{ row }"><span class="mono">{{ row.code }}</span></template>
           <template #cell-description="{ row }">{{ row.description || '-' }}</template>
           <template #cell-dataScope="{ row }">

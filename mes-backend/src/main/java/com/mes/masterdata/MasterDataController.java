@@ -46,7 +46,12 @@ public class MasterDataController {
     }
 
     @GetMapping("/customers")
-    public ApiResponse customers(@RequestParam(required = false) String keyword) {
+    public ApiResponse customers(@RequestParam(required = false) String keyword,
+                                 @RequestParam(required = false) Integer page,
+                                 @RequestParam(defaultValue = "20") int size) {
+        if (page != null) {
+            return ApiResponse.ok(service.customerPage(keyword, page, size));
+        }
         return ApiResponse.ok(service.customers(keyword));
     }
 
@@ -75,7 +80,13 @@ public class MasterDataController {
     public ApiResponse products(@RequestParam(required = false) String keyword,
                                 @RequestParam(required = false) String category,
                                 @RequestParam(required = false) String customFieldKey,
-                                @RequestParam(required = false) String customFieldValue) {
+                                @RequestParam(required = false) String customFieldValue,
+                                @RequestParam(required = false) Integer page,
+                                @RequestParam(defaultValue = "20") int size) {
+        if (page != null) {
+            return ApiResponse.ok(service.productPage(keyword, category, customFieldKey,
+                    customFieldValue, page, size));
+        }
         return ApiResponse.ok(service.products(keyword, category, customFieldKey, customFieldValue));
     }
 
@@ -135,7 +146,11 @@ public class MasterDataController {
     }
 
     @GetMapping("/warehouses")
-    public ApiResponse warehouses() {
+    public ApiResponse warehouses(@RequestParam(required = false) Integer page,
+                                  @RequestParam(required = false) Integer size) {
+        if (page != null) {
+            return ApiResponse.ok(service.pageWarehouses(page, size == null ? 20 : size));
+        }
         return ApiResponse.ok(service.warehouses());
     }
 

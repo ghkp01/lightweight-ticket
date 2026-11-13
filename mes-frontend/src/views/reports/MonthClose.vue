@@ -9,6 +9,9 @@ const month = ref('')
 const activeTab = ref('stock')
 const loading = ref(false)
 const stock = ref<any>({ summary: {}, rows: [] })
+const stockTotal = ref(0)
+const stockPage = ref(1)
+const stockSize = ref(20)
 const settlement = ref<any>({})
 
 const stockSummary = computed(() => stock.value.summary || {})
@@ -24,13 +27,34 @@ const loadMonths = async () => {
 const loadStock = async () => {
   loading.value = true
   try {
-    stock.value = (await api.get('/month-close/stock', { month: month.value })) || {
-      summary: {},
-      rows: []
+    const data = await api.get('/month-close/stock', {
+      month: month.value,
+      page: stockPage.value,
+      size: stockSize.value
+    })
+    stock.value = {
+      summary: data?.summary || {},
+      rows: data?.rows || []
     }
+    stockTotal.value = data?.total ?? stock.value.rows.length
   } finally {
     loading.value = false
   }
+}
+
+const changeStockPage = (value: number) => {
+  stockPage.value = value
+  loadStock()
+}
+
+const changeStockSize = () => {
+  stockPage.value = 1
+  loadStock()
+}
+
+const changeMonth = () => {
+  stockPage.value = 1
+  reload()
 }
 
 const loadSettlement = async () => {
@@ -53,8 +77,14 @@ const reload = async () => {
 
 const onTabChange = () => reload()
 
-const exportStock = () => {
-  if (!stockRows.value.length) {
+const exportStock = async () => {
+  if (!stockTotal.value) {
+    ElMessage.warning('没有可导出的库存月结数据')
+    return
+  }
+  const data = await api.get('/month-close/stock', { month: month.value })
+  const rows = data?.rows || []
+  if (!rows.length) {
     ElMessage.warning('没有可导出的库存月结数据')
     return
   }
@@ -72,7 +102,7 @@ const exportStock = () => {
     { key: 'closeQty', label: '期末数量', prop: 'closeQty' },
     { key: 'closeAmount', label: '期末金额', prop: 'closeAmount' }
   ]
-  const count = downloadCsv(null, stockRows.value, datedFileName(`库存月结_${month.value}`), columns)
+  const count = downloadCsv(null, rows, datedFileName(`库存月结_${month.value}`), columns)
   ElMessage.success(`已导出 ${count} 行库存月结`)
 }
 
@@ -122,7 +152,7 @@ onMounted(async () => {
       <div class="head-actions">
         <el-button
           plain
-          :disabled="activeTab === 'stock' ? !stockRows.length : !settlement.month"
+          :disabled="activeTab === 'stock' ? !stockTotal : !settlement.month"
           @click="activeTab === 'stock' ? exportStock() : exportSettlement()"
         >
           导出 CSV
@@ -132,7 +162,7 @@ onMounted(async () => {
 
     <div class="panel">
       <div class="filter-bar">
-        <el-select v-model="month" placeholder="选择月份" style="width: 160px" @change="reload">
+        <el-select v-model="month" placeholder="选择月份" style="width: 160px" @change="changeMonth">
           <el-option
             v-for="item in monthOptions"
             :key="item.month"
@@ -205,6 +235,17 @@ onMounted(async () => {
                   </template>
                 </el-table-column>
               </el-table>
+            </div>
+            <div class="pager">
+              <el-pagination
+                v-model:current-page="stockPage"
+                v-model:page-size="stockSize"
+                :total="stockTotal"
+                :page-sizes="[10, 20, 50, 100]"
+                layout="total, sizes, prev, pager, next"
+                @current-change="changeStockPage"
+                @size-change="changeStockSize"
+              />
             </div>
             <div class="muted note">
               期初取该月 1 日之前的流水累计，期末 = 期初 + 入库 − 出库；数量与金额都来自库存流水

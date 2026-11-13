@@ -45,8 +45,9 @@ public class BomTaskController {
 
     @GetMapping("/assignees")
     @PreAuthorize("hasAuthority('bom_task')")
-    public ApiResponse assignees() {
-        return ApiResponse.ok(service.assignees());
+    public ApiResponse assignees(@RequestParam(required = false) String keyword,
+                                 @RequestParam(required = false) Integer limit) {
+        return ApiResponse.ok(service.assignees(keyword, limit));
     }
 
     @PostMapping

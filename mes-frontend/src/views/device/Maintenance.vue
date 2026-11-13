@@ -15,6 +15,9 @@ const checkDate = ref(dateText(new Date()))
 const checkDevice = ref<number | ''>('')
 const checkStatus = ref('')
 const checks = ref<any[]>([])
+const checkPage = ref(1)
+const checkSize = ref(20)
+const checkTotal = ref(0)
 const checkLoading = ref(false)
 const taskDrawer = ref(false)
 const taskDetail = ref<any>(null)
@@ -46,6 +49,9 @@ const logsLoading = ref(false)
 
 // ---------------- 故障
 const faults = ref<any[]>([])
+const faultPage = ref(1)
+const faultSize = ref(20)
+const faultTotal = ref(0)
 const faultStatus = ref('')
 const faultLoading = ref(false)
 const faultDialog = ref(false)
@@ -74,14 +80,28 @@ const loadSummary = async () => {
 const loadChecks = async () => {
   checkLoading.value = true
   try {
-    checks.value = (await api.get('/device-maintenance/checks', {
+    const data = await api.get('/device-maintenance/checks', {
       date: checkDate.value,
       deviceId: checkDevice.value || undefined,
-      status: checkStatus.value || undefined
-    })) || []
+      status: checkStatus.value || undefined,
+      page: checkPage.value,
+      size: checkSize.value
+    })
+    checks.value = data?.records || []
+    checkTotal.value = data?.total || 0
   } finally {
     checkLoading.value = false
   }
+}
+
+const reloadChecks = () => {
+  checkPage.value = 1
+  loadChecks()
+}
+
+const changeCheckPage = (value: number) => {
+  checkPage.value = value
+  loadChecks()
 }
 
 const generateTasks = async () => {
@@ -89,7 +109,7 @@ const generateTasks = async () => {
     `/device-maintenance/checks/generate?date=${encodeURIComponent(checkDate.value)}`
   )
   ElMessage.success(`已生成 ${result?.created ?? 0} 张点检任务`)
-  await loadChecks()
+  await reloadChecks()
   await loadSummary()
 }
 
@@ -168,7 +188,9 @@ const saveItem = async () => {
     ElMessage.warning('请填写点检项名称')
     return
   }
-  await api.post('/device-maintenance/check-items', { id: editingItemId.value, ...itemForm })
+  const payload: any = { ...itemForm }
+  delete payload.deviceLabel
+  await api.post('/device-maintenance/check-items', { id: editingItemId.value, ...payload })
   ElMessage.success('点检项已保存')
   itemDrawer.value = false
   await loadItems()
@@ -276,12 +298,26 @@ const submitExecute = async () => {
 const loadFaults = async () => {
   faultLoading.value = true
   try {
-    faults.value = (await api.get('/device-maintenance/faults', {
-      status: faultStatus.value || undefined
-    })) || []
+    const data = await api.get('/device-maintenance/faults', {
+      status: faultStatus.value || undefined,
+      page: faultPage.value,
+      size: faultSize.value
+    })
+    faults.value = data?.records || []
+    faultTotal.value = data?.total || 0
   } finally {
     faultLoading.value = false
   }
+}
+
+const reloadFaults = () => {
+  faultPage.value = 1
+  loadFaults()
+}
+
+const changeFaultPage = (value: number) => {
+  faultPage.value = value
+  loadFaults()
 }
 
 const openFault = () => {
@@ -297,7 +333,7 @@ const submitFault = async () => {
   await api.post('/device-maintenance/faults', { ...faultForm })
   ElMessage.success('已报修，设备置为停机')
   faultDialog.value = false
-  await Promise.all([loadFaults(), loadSummary()])
+  await Promise.all([reloadFaults(), loadSummary()])
 }
 
 const openClose = (row: any) => {
@@ -369,14 +405,14 @@ onMounted(async () => {
       <el-tabs v-model="activeTab" @tab-change="onTabChange">
         <el-tab-pane label="点检任务" name="checks">
           <div class="filter-bar">
-            <el-date-picker v-model="checkDate" type="date" value-format="YYYY-MM-DD" :clearable="false" style="width: 150px" />
+            <el-date-picker v-model="checkDate" type="date" value-format="YYYY-MM-DD" :clearable="false" style="width: 150px" @change="reloadChecks" />
             <ReferenceSelect v-model="checkDevice" url="/devices/options"
-                             placeholder="全部设备" style="width: 180px" />
-            <el-select v-model="checkStatus" placeholder="全部状态" clearable style="width: 130px">
+                             placeholder="全部设备" style="width: 180px" @select="reloadChecks" />
+            <el-select v-model="checkStatus" placeholder="全部状态" clearable style="width: 130px" @change="reloadChecks">
               <el-option label="待点检" value="PENDING" />
               <el-option label="已点检" value="DONE" />
             </el-select>
-            <el-button type="primary" :loading="checkLoading" @click="loadChecks">查询</el-button>
+            <el-button type="primary" :loading="checkLoading" @click="reloadChecks">查询</el-button>
             <div class="spacer"></div>
             <el-button plain @click="generateTasks">生成当日任务</el-button>
           </div>
@@ -418,6 +454,17 @@ onMounted(async () => {
                 </template>
               </el-table-column>
             </el-table>
+          </div>
+          <div class="pager">
+            <el-pagination
+              v-model:current-page="checkPage"
+              v-model:page-size="checkSize"
+              :total="checkTotal"
+              :page-sizes="[10, 20, 50, 100]"
+              layout="total, sizes, prev, pager, next"
+              @current-change="changeCheckPage"
+              @size-change="loadChecks"
+            />
           </div>
         </el-tab-pane>
 
@@ -524,7 +571,7 @@ onMounted(async () => {
 
         <el-tab-pane label="故障记录" name="faults">
           <div class="filter-bar">
-            <el-select v-model="faultStatus" placeholder="全部状态" clearable style="width: 130px" @change="loadFaults">
+            <el-select v-model="faultStatus" placeholder="全部状态" clearable style="width: 130px" @change="reloadFaults">
               <el-option label="待处理" value="OPEN" />
               <el-option label="已关闭" value="CLOSED" />
             </el-select>
@@ -566,6 +613,17 @@ onMounted(async () => {
                 </template>
               </el-table-column>
             </el-table>
+          </div>
+          <div class="pager">
+            <el-pagination
+              v-model:current-page="faultPage"
+              v-model:page-size="faultSize"
+              :total="faultTotal"
+              :page-sizes="[10, 20, 50, 100]"
+              layout="total, sizes, prev, pager, next"
+              @current-change="changeFaultPage"
+              @size-change="loadFaults"
+            />
           </div>
         </el-tab-pane>
       </el-tabs>

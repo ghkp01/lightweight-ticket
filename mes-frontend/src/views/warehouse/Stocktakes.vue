@@ -208,13 +208,13 @@ onMounted(async () => {
 
     <div class="panel">
       <div class="filter-bar">
-        <el-input v-model="keyword" placeholder="盘点单号" clearable style="width: 230px" @keyup.enter="load" />
-        <el-select v-model="status" placeholder="全部状态" clearable style="width: 140px" @change="load">
+        <el-input v-model="keyword" placeholder="盘点单号" clearable style="width: 230px" @keyup.enter="reload" />
+        <el-select v-model="status" placeholder="全部状态" clearable style="width: 140px" @change="reload">
           <el-option label="草稿" value="DRAFT" />
           <el-option label="已完成" value="COMPLETED" />
           <el-option label="已取消" value="CANCELLED" />
         </el-select>
-        <el-button type="primary" plain @click="load">查询</el-button>
+        <el-button type="primary" plain @click="reload">查询</el-button>
         <div class="spacer"></div>
         <TableToolbar :table="table" export-api="/stocktakes" export-name="库存盘点" @applied="reload" />
         <span class="toolbar-tip">共 {{ total }} 张盘点单</span>

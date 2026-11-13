@@ -1,6 +1,7 @@
 package com.mes.job;
 
 import com.mes.approval.api.ApprovalPort;
+import com.mes.common.PageResult;
 import com.mes.cost.api.CostPort;
 import com.mes.device.api.DeviceTelemetryPort;
 import com.mes.device.api.MaintenancePort;
@@ -196,6 +197,31 @@ public class JobService {
                        to_char(started_at, 'YYYY-MM-DD HH24:MI:SS') as "startedAt"
                 from sys_job_log
                 """ + where + " order by id desc limit ?", args);
+    }
+
+    /** 执行记录分页；不传 page 时仍走 logs(code, limit) 返回最近记录 */
+    public PageResult logsPage(String code, int page, int size) {
+        int safePage = Math.max(1, page);
+        int safeSize = Math.max(1, Math.min(size, 200));
+        boolean filtered = code != null && !code.isBlank();
+        String where = filtered ? " where job_code = ? " : "";
+        Long total = filtered
+                ? jdbcTemplate.queryForObject("select count(*) from sys_job_log" + where, Long.class, code)
+                : jdbcTemplate.queryForObject("select count(*) from sys_job_log", Long.class);
+        List<Object> args = new ArrayList<>();
+        if (filtered) {
+            args.add(code);
+        }
+        args.add(safeSize);
+        args.add((long) (safePage - 1) * safeSize);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                select id, job_code as "jobCode", job_name as "jobName",
+                       trigger_type as "triggerType", status, affected,
+                       duration_ms as "durationMs", message, operator,
+                       to_char(started_at, 'YYYY-MM-DD HH24:MI:SS') as "startedAt"
+                from sys_job_log
+                """ + where + " order by id desc limit ? offset ?", args.toArray());
+        return new PageResult(rows, total == null ? 0 : total, safePage, safeSize);
     }
 
     /**

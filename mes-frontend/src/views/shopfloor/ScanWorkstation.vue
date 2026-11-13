@@ -145,9 +145,8 @@ const selectedDocs = computed(() => {
   return [...(workDocs.value.productDocuments || []), ...((opDocs && opDocs.documents) || [])]
 })
 
-const issueWorkOrders = ref<any[]>([])
-const knownWorkOrders = ref<any[]>([])
 const issueWorkOrderId = ref<number | null>(null)
+const issueWorkOrderLabel = ref('')
 const issueWorkDetail = ref<any>(null)
 const issueWarehouseId = ref<number | null>(null)
 const issueWarehouseLabel = ref('')
@@ -155,17 +154,6 @@ const issueIssuer = ref('')
 const issueDetailLoading = ref(false)
 const issueQty = ref<number>(1)
 const submittingIssue = ref(false)
-
-const issueWorkOptions = computed(() => {
-  const map = new Map<number, any>()
-  for (const work of issueWorkOrders.value) map.set(work.id, work)
-  for (const work of knownWorkOrders.value) {
-    if (['RELEASED', 'IN_PROGRESS'].includes(String(work.status)) && !map.has(work.id)) {
-      map.set(work.id, work)
-    }
-  }
-  return Array.from(map.values())
-})
 
 const issueBomLine = computed(() => {
   if (!currentMaterial.value || !issueWorkDetail.value) return null
@@ -242,11 +230,6 @@ const parseCode = (raw: string): ParsedCode | null => {
   return { kind: 'WO', workNo: text, seq: null }
 }
 
-const rememberWork = (work: any) => {
-  if (!work?.id) return
-  knownWorkOrders.value = [work, ...knownWorkOrders.value.filter((item) => item.id !== work.id)]
-}
-
 const loadIssueDetail = async () => {
   if (!issueWorkOrderId.value) {
     issueWorkDetail.value = null
@@ -263,34 +246,19 @@ const loadIssueDetail = async () => {
   }
 }
 
-const syncIssueSelection = async () => {
-  const options = issueWorkOptions.value
-  if (!options.length) {
-    issueWorkOrderId.value = null
-    issueWorkDetail.value = null
-    return
-  }
-  if (!options.some((work) => work.id === issueWorkOrderId.value)) {
-    const preferred = knownWorkOrders.value.find(
-      (work) => ['RELEASED', 'IN_PROGRESS'].includes(String(work.status)) && options.some((item) => item.id === work.id)
-    )
-    issueWorkOrderId.value = preferred?.id ?? options[0].id
-  }
-  await loadIssueDetail()
-}
-
-const loadIssueWorkOrders = async (force = false) => {
-  if (issueWorkOrders.value.length && !force) {
-    await syncIssueSelection()
-    return
-  }
+/** 没有指定工单时默认落到第一张可领料工单，具体工单用远程搜索选择 */
+const loadIssueWorkOrders = async () => {
   try {
-    const [released, inProgress] = await Promise.all([
-      api.get('/work-orders', { status: 'RELEASED', page: 1, size: 100 }),
-      api.get('/work-orders', { status: 'IN_PROGRESS', page: 1, size: 100 })
-    ])
-    issueWorkOrders.value = [...(released?.records || []), ...(inProgress?.records || [])]
-    await syncIssueSelection()
+    if (!issueWorkOrderId.value) {
+      const options = await api.get('/work-orders/options', {
+        status: 'RELEASED,IN_PROGRESS',
+        limit: 1
+      })
+      const first = options?.[0] || null
+      issueWorkOrderId.value = first ? first.id : null
+      issueWorkOrderLabel.value = first ? `${first.workNo} · ${first.productName}` : ''
+    }
+    await loadIssueDetail()
   } catch (err) {
     notifyError(err, '可领料工单加载失败')
   }
@@ -336,10 +304,10 @@ const loadWorkOrder = async (workNo: string, seq: number | null, raw: string, ki
     currentMaterial.value = null
     currentUnit.value = null
     mode.value = kind
-    rememberWork(data)
     loadWorkDocs(data.id)
     if (['RELEASED', 'IN_PROGRESS'].includes(String(data.status))) {
       issueWorkOrderId.value = data.id
+      issueWorkOrderLabel.value = `${data.workNo} · ${data.productName}`
     }
     const operations = data.operations || []
     let operation = null
@@ -535,7 +503,9 @@ const refreshCurrentWork = async () => {
   const operationId = reportForm.operationId
   const data = await api.get(`/work-orders/by-no/${encodeURIComponent(currentWork.value.workNo)}`)
   currentWork.value = data
-  rememberWork(data)
+  if (Number(issueWorkOrderId.value) === Number(data.id)) {
+    issueWorkOrderLabel.value = `${data.workNo} · ${data.productName}`
+  }
   const operations = data.operations || []
   const operation = operations.find((op: any) => op.id === operationId) || operations[0]
   applyOperation(operation)
@@ -1324,20 +1294,19 @@ onBeforeUnmount(() => {
               <div class="card-body">
                 <el-form label-position="top">
                   <el-form-item label="领料工单" required>
-                    <el-select
+                    <ReferenceSelect
                       v-model="issueWorkOrderId"
-                      filterable
-                      placeholder="选择已下达或生产中的工单"
-                      style="width: 100%"
-                      @change="loadIssueDetail"
-                    >
-                      <el-option
-                        v-for="work in issueWorkOptions"
-                        :key="work.id"
-                        :label="`${work.workNo} · ${work.productName}`"
-                        :value="work.id"
-                      />
-                    </el-select>
+                      url="/work-orders/options"
+                      :params="{ status: 'RELEASED,IN_PROGRESS' }"
+                      :initial-label="issueWorkOrderLabel"
+                      code-field="workNo"
+                      label-field="productName"
+                      placeholder="输入工单号或产品搜索（已下达/生产中）"
+                      @select="(work) => {
+                        issueWorkOrderLabel = work ? `${work.workNo} · ${work.productName}` : ''
+                        loadIssueDetail()
+                      }"
+                    />
                   </el-form-item>
 
                   <div v-loading="issueDetailLoading" class="bom-line">

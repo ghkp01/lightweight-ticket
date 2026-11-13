@@ -1,6 +1,7 @@
 package com.mes.integration;
 
 import com.mes.common.BizException;
+import com.mes.common.PageResult;
 import com.mes.platform.config.ConfigService;
 import com.mes.security.CurrentUser;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -66,6 +67,23 @@ public class ApiTokenService {
                 from sys_api_token order by id desc
                 """);
         return rows;
+    }
+
+    /** 令牌列表分页；不传 page 时仍走 list() 返回全量 */
+    public PageResult page(int page, int size) {
+        int safePage = Math.max(1, page);
+        int safeSize = Math.max(1, Math.min(size, 200));
+        Long total = jdbcTemplate.queryForObject("select count(*) from sys_api_token", Long.class);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                select id, name, token_prefix as "tokenPrefix", scopes, enabled,
+                       to_char(expires_at, 'YYYY-MM-DD') as "expiresOn",
+                       to_char(last_used_at, 'YYYY-MM-DD HH24:MI') as "lastUsedAt",
+                       created_by as "createdBy", remark,
+                       to_char(created_at, 'YYYY-MM-DD HH24:MI') as "createdAt",
+                       (expires_at is not null and expires_at < now()) as "expired"
+                from sys_api_token order by id desc limit ? offset ?
+                """, safeSize, (long) (safePage - 1) * safeSize);
+        return new PageResult(rows, total == null ? 0 : total, safePage, safeSize);
     }
 
     /** 新建令牌：明文只在这里返回一次 */

@@ -2,6 +2,7 @@ package com.mes.org;
 
 import com.mes.common.BizException;
 import com.mes.common.CodeGenerator;
+import com.mes.common.PageResult;
 import com.mes.org.api.WorkCenterPort;
 import com.mes.process.api.ProcessUsagePort;
 import jakarta.validation.constraints.NotBlank;
@@ -121,6 +122,45 @@ public class WorkCenterService implements WorkCenterPort {
                 where 1 = 1
                 """);
         List<Object> args = new ArrayList<>();
+        appendFilters(sql, args, keyword, orgId, enabled);
+        sql.append(" order by w.id");
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql.toString(), args.toArray());
+        fillProcessUsage(rows);
+        return rows;
+    }
+
+    /** 工作中心列表分页；不传 page 时仍走 list() 返回全量 */
+    public PageResult page(String keyword, Long orgId, Boolean enabled, int page, int size) {
+        int safePage = Math.max(1, page);
+        int safeSize = Math.max(1, Math.min(size, 200));
+        String base = """
+                from work_center w
+                left join sys_org o on o.id = w.org_id
+                where 1 = 1
+                """;
+        StringBuilder where = new StringBuilder(base);
+        List<Object> args = new ArrayList<>();
+        appendFilters(where, args, keyword, orgId, enabled);
+        Long total = jdbcTemplate.queryForObject("select count(*) " + where, Long.class, args.toArray());
+        List<Object> pageArgs = new ArrayList<>(args);
+        pageArgs.add(safeSize);
+        pageArgs.add((long) (safePage - 1) * safeSize);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                select w.id, w.code, w.name, w.org_id as "orgId", o.name as "orgName", o.path as "orgPath",
+                       w.type, w.daily_capacity_minutes as "dailyCapacityMinutes", w.enabled, w.remark,
+                       (select count(*) from work_center_device d where d.work_center_id = w.id) as "deviceCount",
+                       (select count(*) from work_center_device d where d.work_center_id = w.id
+                         and d.enabled = true and d.status in ('RUNNING', 'IDLE')) as "activeDeviceCount",
+                       (select coalesce(sum(d.capacity_minutes), 0) from work_center_device d
+                         where d.work_center_id = w.id
+                           and d.enabled = true and d.status in ('RUNNING', 'IDLE')) as "deviceCapacityMinutes"
+                """ + where + " order by w.id limit ? offset ?", pageArgs.toArray());
+        fillProcessUsage(rows);
+        return new PageResult(rows, total == null ? 0 : total, safePage, safeSize);
+    }
+
+    private static void appendFilters(StringBuilder sql, List<Object> args,
+                                      String keyword, Long orgId, Boolean enabled) {
         if (keyword != null && !keyword.isBlank()) {
             sql.append(" and (w.code ilike ? or w.name ilike ?) ");
             String like = "%" + keyword.trim() + "%";
@@ -136,8 +176,9 @@ public class WorkCenterService implements WorkCenterPort {
             sql.append(" and w.enabled = ? ");
             args.add(enabled);
         }
-        sql.append(" order by w.id");
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql.toString(), args.toArray());
+    }
+
+    private void fillProcessUsage(List<Map<String, Object>> rows) {
         // 工序数与工序名归 process：一次汇总取回来再按中心补，别在 SQL 里 join 别人的表
         Map<Long, ProcessUsagePort.ProcessUsage> usage = processUsage.usageByWorkCenter();
         for (Map<String, Object> row : rows) {
@@ -146,16 +187,33 @@ public class WorkCenterService implements WorkCenterPort {
             row.put("processCount", item == null ? 0 : item.processCount());
             row.put("processNames", item == null ? null : item.processNames());
         }
-        return rows;
     }
 
     public List<Map<String, Object>> options() {
-        return jdbcTemplate.queryForList("""
+        return options(null, null);
+    }
+
+    /** 引用选择专用：关键字过滤 + 条数上限；limit 为空时保持原行为（返回全部启用工作中心） */
+    public List<Map<String, Object>> options(String keyword, Integer limit) {
+        StringBuilder sql = new StringBuilder("""
                 select w.id, w.code, w.name, w.org_id as "orgId", o.name as "orgName",
                        w.daily_capacity_minutes as "dailyCapacityMinutes"
                 from work_center w left join sys_org o on o.id = w.org_id
-                where w.enabled = true order by w.id
+                where w.enabled = true
                 """);
+        List<Object> args = new ArrayList<>();
+        if (keyword != null && !keyword.isBlank()) {
+            sql.append(" and (w.code ilike ? or w.name ilike ?) ");
+            String like = "%" + keyword.trim() + "%";
+            args.add(like);
+            args.add(like);
+        }
+        sql.append(" order by w.id ");
+        if (limit != null && limit > 0) {
+            sql.append(" limit ? ");
+            args.add(Math.min(limit, 50));
+        }
+        return jdbcTemplate.queryForList(sql.toString(), args.toArray());
     }
 
     @Transactional

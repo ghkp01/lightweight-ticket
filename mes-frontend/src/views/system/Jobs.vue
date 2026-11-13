@@ -7,6 +7,9 @@ const loading = ref(false)
 const jobs = ref<any[]>([])
 const logs = ref<any[]>([])
 const logsLoading = ref(false)
+const logsTotal = ref(0)
+const logsPage = ref(1)
+const logsSize = ref(20)
 const runCode = ref('')
 const logFilter = ref('')
 
@@ -32,13 +35,26 @@ const load = async () => {
 const loadLogs = async () => {
   logsLoading.value = true
   try {
-    logs.value = (await api.get('/system/jobs/logs', {
+    const data = await api.get('/system/jobs/logs', {
       code: logFilter.value || undefined,
-      limit: 100
-    })) || []
+      page: logsPage.value,
+      size: logsSize.value
+    })
+    logs.value = data?.records || []
+    logsTotal.value = data?.total || 0
   } finally {
     logsLoading.value = false
   }
+}
+
+const changeLogsPage = (value: number) => {
+  logsPage.value = value
+  loadLogs()
+}
+
+const changeLogsSize = () => {
+  logsPage.value = 1
+  loadLogs()
 }
 
 const run = async (job: any) => {
@@ -66,6 +82,7 @@ const durationText = (value: any) => {
 
 const filterLogs = (code: string) => {
   logFilter.value = logFilter.value === code ? '' : code
+  logsPage.value = 1
   loadLogs()
 }
 
@@ -131,6 +148,7 @@ onMounted(async () => {
       <div class="card-head">
         <div class="card-title">执行记录</div>
         <div class="head-actions-inline">
+          <span class="toolbar-tip">共 {{ logsTotal }} 条</span>
           <span v-if="logFilter" class="filter-chip" @click="filterLogs(logFilter)">
             {{ logFilter }} ✕
           </span>
@@ -171,6 +189,17 @@ onMounted(async () => {
             </template>
           </el-table-column>
         </el-table>
+      </div>
+      <div class="pager">
+        <el-pagination
+          v-model:current-page="logsPage"
+          v-model:page-size="logsSize"
+          :total="logsTotal"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next"
+          @current-change="changeLogsPage"
+          @size-change="changeLogsSize"
+        />
       </div>
     </div>
   </div>

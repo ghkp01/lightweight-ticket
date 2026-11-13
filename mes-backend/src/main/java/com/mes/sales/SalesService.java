@@ -413,6 +413,43 @@ public class SalesService implements SalesOrderPort {
         return new PageResult(records, total == null ? 0 : total, page, size);
     }
 
+    /** 引用选择专用：销售订单下拉只返回单号、客户与状态，status 支持逗号分隔多个 */
+    public List<Map<String, Object>> options(String keyword, String status, int limit) {
+        int size = Math.max(1, Math.min(limit, 50));
+        String like = "%" + (keyword == null ? "" : keyword.trim()) + "%";
+        List<Object> args = new ArrayList<>(List.of(like, like));
+        StringBuilder where = new StringBuilder(
+                " where (so.order_no ilike ? or coalesce(so.customer_po_no, '') ilike ?) ");
+        List<String> statuses = splitStatus(status);
+        if (!statuses.isEmpty()) {
+            where.append(" and so.status in (")
+                    .append(String.join(",", java.util.Collections.nCopies(statuses.size(), "?")))
+                    .append(") ");
+            args.addAll(statuses);
+        }
+        Long factoryFilter = orgScopeService.listFilter();
+        if (factoryFilter != null) {
+            where.append(" and (so.factory_org_id = ? or so.factory_org_id is null) ");
+            args.add(factoryFilter);
+        }
+        args.add(size);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                select so.id, so.order_no as "orderNo", so.customer_id as "customerId",
+                       so.status, so.delivery_date as "deliveryDate", so.total_qty as "totalQty"
+                from sales_order so
+                """ + where + " order by so.id desc limit ?", args.toArray());
+        MasterDataViews.fillCustomerNames(masterData, rows);
+        return rows;
+    }
+
+    private static List<String> splitStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return List.of();
+        }
+        return java.util.Arrays.stream(status.split(","))
+                .map(String::trim).filter(item -> !item.isEmpty()).toList();
+    }
+
     /**
      * 列表带出明细行的自定义字段：一张订单多行时按行去重合并成「值1、值2」，
      * 用户把明细字段加到列设置里就能在订单列表直接看到，不必逐单点详情。

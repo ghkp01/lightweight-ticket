@@ -23,7 +23,50 @@ const flowId = ref<number | null>(route.params.id === 'new' ? null : Number(rout
 const loading = ref(false)
 const saving = ref(false)
 const roles = ref<string[]>([])
-const users = ref<any[]>([])
+const userSearchResults = ref<any[]>([])
+const userLabels = ref<Record<string, any>>({})
+
+/** 搜索结果直接替换列表；已选成员姓名单独缓存，避免下拉越搜越多 */
+const rememberUserLabels = (rows: any[]) => {
+  const next = { ...userLabels.value }
+  ;(rows || []).forEach((item) => {
+    if (item?.username) next[item.username] = item
+  })
+  userLabels.value = next
+}
+
+const searchUsers = async (keyword = '') => {
+  try {
+    const rows = await api.get('/system/users/options', { keyword: keyword || undefined, limit: 20 })
+    userSearchResults.value = rows || []
+    rememberUserLabels(rows || [])
+  } catch {
+    // 搜索失败保留当前结果
+  }
+}
+
+/** 编辑既有流程时补全已选成员的姓名，避免下拉只显示用户名 */
+const ensureUserLabels = async (names: string[]) => {
+  const missing = names.filter((name) => !userLabels.value[name])
+  await Promise.all(missing.map(async (name) => {
+    try {
+      const rows = await api.get('/system/users/options', { keyword: name, limit: 5 })
+      rememberUserLabels(rows || [])
+    } catch {
+      // 回显失败时下拉退回显示用户名
+    }
+  }))
+}
+
+/** 下拉候选：当前搜索结果 + 已选成员的姓名缓存 */
+const optionsFor = (selected: string[]) => {
+  const list = [...userSearchResults.value]
+  selected.forEach((name) => {
+    const row = userLabels.value[name]
+    if (row && !list.some((item: any) => String(item.username) === name)) list.push(row)
+  })
+  return list
+}
 
 const flow = reactive({
   code: '',
@@ -155,6 +198,9 @@ const syncPanel = (element: any) => {
       approverSource.value = 'ROLE'
       approverValue.value = String(candidateGroups)
     }
+    if (approverSource.value === 'USER' && approverValue.value) {
+      void ensureUserLabels(approverValue.value.split(',').map((item) => item.trim()).filter(Boolean))
+    }
   }
   if (element.type === 'bpmn:SequenceFlow' && bo.conditionExpression) {
     const body = bo.conditionExpression.body || ''
@@ -280,8 +326,7 @@ const load = async () => {
   loading.value = true
   try {
     roles.value = (await api.get('/approvals/roles')) || []
-    const page = await api.get('/system/users', { page: 1, size: 500 })
-    users.value = (page.records || []).filter((item: any) => item.enabled !== false)
+    void searchUsers('')
     let xml = ''
     if (flowId.value) {
       const detail = await api.get(`/approvals/flows/${flowId.value}`)
@@ -439,10 +484,13 @@ onBeforeUnmount(() => {
               </el-form-item>
 
               <el-form-item v-else-if="approverSource === 'USER'" label="成员（多个用逗号）">
-                <el-select :model-value="approverValue.split(',').filter(Boolean)" multiple filterable style="width: 100%"
+                <el-select :model-value="approverValue.split(',').filter(Boolean)" multiple filterable remote
+                           reserve-keyword :remote-method="searchUsers"
+                           style="width: 100%"
+                           placeholder="输入姓名或账号搜索"
                            @update:model-value="(value: string[]) => { approverValue = value.join(','); applyApproverValue() }">
-                  <el-option v-for="user in users" :key="user.username"
-                             :label="`${user.realName || user.username}（${roleLabel[user.role] || user.role}）`"
+                  <el-option v-for="user in optionsFor(approverValue.split(',').filter(Boolean))" :key="user.username"
+                             :label="`${user.realName || user.username}（${user.roleName || user.username}）`"
                              :value="user.username" />
                 </el-select>
               </el-form-item>

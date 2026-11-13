@@ -25,7 +25,12 @@ public class NoticeController {
     @GetMapping
     public ApiResponse mine(@RequestParam(required = false) String category,
                             @RequestParam(required = false) Boolean unreadOnly,
-                            @RequestParam(defaultValue = "50") int limit) {
+                            @RequestParam(defaultValue = "50") int limit,
+                            @RequestParam(required = false) Integer page,
+                            @RequestParam(defaultValue = "20") int size) {
+        if (page != null) {
+            return ApiResponse.ok(service.page(CurrentUser.name(), category, unreadOnly, page, size));
+        }
         return ApiResponse.ok(service.mine(CurrentUser.name(), category, unreadOnly, limit));
     }
 

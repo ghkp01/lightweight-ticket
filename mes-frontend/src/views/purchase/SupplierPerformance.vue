@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { api, fmtMoney, fmtQty } from '../../api'
 
 const pad = (value: number) => String(value).padStart(2, '0')
@@ -14,40 +14,14 @@ const loading = ref(false)
 const rows = ref<any[]>([])
 const keyword = ref('')
 const onlyRisk = ref(false)
+const page = ref(1)
+const size = ref(20)
+const total = ref(0)
+const summary = ref<any>({ count: 0, totalAmount: 0, onTime: 0, pass: 0, risk: 0 })
 
 const detail = ref<any>(null)
 const drawer = ref(false)
 const detailLoading = ref(false)
-
-const filtered = computed(() => {
-  const text = keyword.value.trim().toLowerCase()
-  return rows.value.filter((row) => {
-    if (onlyRisk.value) {
-      const score = Number(row.score ?? 100)
-      if (row.hasData && score >= 80) return false
-      if (Number(row.onTimeRate ?? 100) >= 90 && Number(row.passRate ?? 100) >= 95) return false
-    }
-    if (!text) return true
-    return [row.code, row.name, row.contact].some((value) =>
-      String(value || '').toLowerCase().includes(text)
-    )
-  })
-})
-
-const summary = computed(() => {
-  const active = filtered.value.filter((row) => row.hasData)
-  const totalAmount = active.reduce((sum, row) => sum + Number(row.amount || 0), 0)
-  const withReceipt = active.filter((row) => Number(row.judgedBatches || 0) > 0)
-  const onTime = withReceipt.length
-    ? withReceipt.reduce((sum, row) => sum + Number(row.onTimeRate || 0), 0) / withReceipt.length
-    : 0
-  const withInspection = active.filter((row) => Number(row.inspections || 0) > 0)
-  const pass = withInspection.length
-    ? withInspection.reduce((sum, row) => sum + Number(row.passRate || 0), 0) / withInspection.length
-    : 0
-  const risk = active.filter((row) => Number(row.score ?? 100) < 80).length
-  return { count: active.length, totalAmount, onTime, pass, risk }
-})
 
 const gradeClass = (grade: any) => {
   const value = String(grade || '')
@@ -68,13 +42,30 @@ const rateClass = (value: any, good: number, bad: number) => {
 const load = async () => {
   loading.value = true
   try {
-    rows.value = (await api.get('/supplier-performance', {
+    const data = await api.get('/supplier-performance', {
       from: range.value?.[0] || undefined,
-      to: range.value?.[1] || undefined
-    })) || []
+      to: range.value?.[1] || undefined,
+      keyword: keyword.value.trim() || undefined,
+      onlyRisk: onlyRisk.value || undefined,
+      page: page.value,
+      size: size.value
+    })
+    rows.value = data?.records || []
+    total.value = data?.total || 0
+    summary.value = data?.summary || { count: 0, totalAmount: 0, onTime: 0, pass: 0, risk: 0 }
   } finally {
     loading.value = false
   }
+}
+
+const reload = () => {
+  page.value = 1
+  load()
+}
+
+const changePage = (value: number) => {
+  page.value = value
+  load()
 }
 
 const openDetail = async (row: any) => {
@@ -115,12 +106,20 @@ onMounted(load)
           end-placeholder="结束日期"
           :clearable="false"
           style="width: 250px"
+          @change="reload"
         />
-        <el-button type="primary" :loading="loading" @click="load">查询</el-button>
-        <el-input v-model="keyword" placeholder="供应商编码 / 名称" clearable style="width: 200px" />
-        <el-checkbox v-model="onlyRisk">只看待改进</el-checkbox>
+        <el-button type="primary" :loading="loading" @click="reload">查询</el-button>
+        <el-input
+          v-model="keyword"
+          placeholder="供应商编码 / 名称"
+          clearable
+          style="width: 200px"
+          @keyup.enter="reload"
+          @clear="reload"
+        />
+        <el-checkbox v-model="onlyRisk" @change="reload">只看待改进</el-checkbox>
         <div class="spacer"></div>
-        <span class="toolbar-tip">得分 = 准时率×40% + 合格率×40% +（1−退货率）×20%</span>
+        <span class="toolbar-tip">共 {{ total }} 家 · 得分 = 准时率×40% + 合格率×40% +（1−退货率）×20%</span>
       </div>
 
       <div v-loading="loading" class="body">
@@ -150,7 +149,7 @@ onMounted(load)
         </div>
 
         <div class="table-wrap">
-          <el-table :data="filtered" size="small" empty-text="所选区间没有供应商往来数据">
+          <el-table :data="rows" size="small" empty-text="所选区间没有供应商往来数据">
             <el-table-column label="供应商" min-width="200">
               <template #default="{ row }">
                 <div class="cell-main">{{ row.name }}</div>
@@ -208,6 +207,18 @@ onMounted(load)
               </template>
             </el-table-column>
           </el-table>
+        </div>
+
+        <div class="pager">
+          <el-pagination
+            v-model:current-page="page"
+            v-model:page-size="size"
+            :total="total"
+            :page-sizes="[10, 20, 50, 100]"
+            layout="total, sizes, prev, pager, next"
+            @current-change="changePage"
+            @size-change="load"
+          />
         </div>
       </div>
     </div>

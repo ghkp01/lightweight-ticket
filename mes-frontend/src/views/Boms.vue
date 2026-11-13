@@ -17,6 +17,9 @@ const loading = ref(false)
 const rows = ref<any[]>([])
 const keyword = ref('')
 const status = ref('')
+const page = ref(1)
+const size = ref(20)
+const total = ref(0)
 const route = useRoute()
 
 const table = useTableView({
@@ -36,7 +39,9 @@ const table = useTableView({
   setFilters: (filters) => {
     keyword.value = filters.keyword || ''
     status.value = filters.status || ''
-  }
+  },
+  getPageSize: () => size.value,
+  setPageSize: (value) => { size.value = value }
 })
 
 const statusMap: Record<string, { label: string; cls: string }> = {
@@ -55,10 +60,22 @@ const today = () => {
 const load = async () => {
   loading.value = true
   try {
-    rows.value = await api.get('/boms', { keyword: keyword.value, status: status.value || undefined })
+    const data = await api.get('/boms', {
+      keyword: keyword.value,
+      status: status.value || undefined,
+      page: page.value,
+      size: size.value
+    })
+    rows.value = data?.records || []
+    total.value = data?.total || 0
   } finally {
     loading.value = false
   }
+}
+
+const reload = () => {
+  page.value = 1
+  load()
 }
 
 // ---------------- 新建 / 编辑 BOM 头
@@ -341,18 +358,18 @@ onMounted(async () => {
           placeholder="物料编码 / 名称 / BOM 编号"
           clearable
           style="width: 260px"
-          @keyup.enter="load"
+          @keyup.enter="reload"
         />
-        <el-select v-model="status" clearable placeholder="全部状态" style="width: 140px" @change="load">
+        <el-select v-model="status" clearable placeholder="全部状态" style="width: 140px" @change="reload">
           <el-option label="草稿" value="DRAFT" />
           <el-option label="审批中" value="PENDING" />
           <el-option label="生效" value="ACTIVE" />
           <el-option label="停用" value="INACTIVE" />
         </el-select>
-        <el-button type="primary" plain @click="load">查询</el-button>
+        <el-button type="primary" plain @click="reload">查询</el-button>
         <div class="spacer"></div>
-        <TableToolbar :table="table" export-api="/boms" export-name="BOM" @applied="load" />
-        <span class="toolbar-tip">共 {{ rows.length }} 套 BOM</span>
+        <TableToolbar :table="table" export-api="/boms" export-name="BOM" @applied="reload" />
+        <span class="toolbar-tip">共 {{ total }} 套 BOM</span>
       </div>
 
       <div class="table-wrap">
@@ -420,6 +437,18 @@ onMounted(async () => {
       </div>
       <div class="bom-tip">
         提示：新版本一律从草稿开始，维护明细后提交审批；审批通过自动替换同物料旧版本。生效/审批中的版本只读，如需变更请点「复制新版本」。
+      </div>
+
+      <div class="pager">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="size"
+          :total="total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next"
+          @current-change="load"
+          @size-change="load"
+        />
       </div>
     </div>
 

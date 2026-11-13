@@ -26,12 +26,21 @@ public class ReportController {
     }
 
     @GetMapping("/payroll")
-    public ApiResponse payroll(@RequestParam(required = false) String month) {
+    public ApiResponse payroll(@RequestParam(required = false) String month,
+                               @RequestParam(required = false) Integer page,
+                               @RequestParam(required = false) Integer size) {
+        if (page != null) {
+            return ApiResponse.ok(service.payrollPage(month, page, size == null ? 20 : size));
+        }
         return ApiResponse.ok(service.payroll(month));
     }
 
     @GetMapping("/delivery")
-    public ApiResponse delivery() {
+    public ApiResponse delivery(@RequestParam(required = false) Integer page,
+                                @RequestParam(required = false) Integer size) {
+        if (page != null) {
+            return ApiResponse.ok(service.deliveryPage(page, size == null ? 20 : size));
+        }
         return ApiResponse.ok(service.delivery());
     }
 }

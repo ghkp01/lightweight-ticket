@@ -26,6 +26,11 @@ const page = ref(1)
 const size = ref(20)
 const summary = ref<any>({})
 
+const reload = () => {
+  page.value = 1
+  load()
+}
+
 const dialogVisible = ref(false)
 const saving = ref(false)
 const form = reactive<{ id: number | null; worker: string; standardMinutes: any; actualMinutes: any; remark: string }>({
@@ -293,9 +298,9 @@ onMounted(load)
           value-format="YYYY-MM"
           placeholder="选择期间"
           style="width: 150px"
-          @change="load"
+          @change="reload"
         />
-        <el-select v-model="status" clearable placeholder="全部状态" style="width: 130px" @change="load">
+        <el-select v-model="status" clearable placeholder="全部状态" style="width: 130px" @change="reload">
           <el-option v-for="item in statusOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
         <el-input
@@ -303,8 +308,8 @@ onMounted(load)
           clearable
           placeholder="按员工搜索"
           style="width: 170px"
-          @keyup.enter="load"
-          @clear="load"
+          @keyup.enter="reload"
+          @clear="reload"
         />
         <el-button :loading="generating" type="primary" @click="generate">生成本期绩效</el-button>
         <el-button @click="openHours">工时填报</el-button>

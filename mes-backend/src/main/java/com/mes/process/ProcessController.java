@@ -31,7 +31,12 @@ public class ProcessController {
 
     @GetMapping
     public ApiResponse list(@RequestParam(required = false) String keyword,
-                            @RequestParam(required = false) Boolean enabled) {
+                            @RequestParam(required = false) Boolean enabled,
+                            @RequestParam(required = false) Integer page,
+                            @RequestParam(defaultValue = "20") int size) {
+        if (page != null) {
+            return ApiResponse.ok(service.page(keyword, enabled, page, size));
+        }
         return ApiResponse.ok(service.list(keyword, enabled));
     }
 
@@ -64,7 +69,9 @@ public class ProcessController {
 
     /** 派工候选：该工序的持证人员；返回空数组表示这道工序没有启用技能管控 */
     @GetMapping("/{id}/skill-users")
-    public ApiResponse skillUsers(@PathVariable long id) {
-        return ApiResponse.ok(userSkillPort.candidates(id));
+    public ApiResponse skillUsers(@PathVariable long id,
+                                  @RequestParam(required = false) String keyword,
+                                  @RequestParam(required = false) Integer limit) {
+        return ApiResponse.ok(userSkillPort.candidates(id, keyword, limit));
     }
 }

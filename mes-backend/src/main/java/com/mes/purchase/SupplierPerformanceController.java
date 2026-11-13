@@ -25,7 +25,14 @@ public class SupplierPerformanceController {
     @GetMapping
     public ApiResponse ranking(@RequestParam(required = false) String from,
                                @RequestParam(required = false) String to,
-                               @RequestParam(required = false) Long supplierId) {
+                               @RequestParam(required = false) Long supplierId,
+                               @RequestParam(required = false) String keyword,
+                               @RequestParam(required = false) Boolean onlyRisk,
+                               @RequestParam(required = false) Integer page,
+                               @RequestParam(defaultValue = "20") int size) {
+        if (page != null) {
+            return ApiResponse.ok(service.rankingPage(from, to, supplierId, keyword, onlyRisk, page, size));
+        }
         return ApiResponse.ok(service.ranking(from, to, supplierId));
     }
 

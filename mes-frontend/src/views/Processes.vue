@@ -3,6 +3,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, fmtMoney, fmtQty, nextCode } from '../api'
 import InspectionItemEditor from '../components/InspectionItemEditor.vue'
+import ReferenceSelect from '../components/ReferenceSelect.vue'
 import DataTable from '../components/DataTable.vue'
 import TableToolbar from '../components/TableToolbar.vue'
 import { useTableView } from '../composables/useTableView'
@@ -10,6 +11,9 @@ import { useTableView } from '../composables/useTableView'
 const rows = ref<any[]>([])
 const loading = ref(false)
 const keyword = ref('')
+const page = ref(1)
+const size = ref(20)
+const total = ref(0)
 
 // 表格视图：列显示 / 冻结 / 列宽与默认筛选按账号保存
 const table = useTableView({
@@ -29,17 +33,19 @@ const table = useTableView({
   getFilters: () => ({ keyword: keyword.value }),
   setFilters: (filters) => {
     keyword.value = filters.keyword || ''
-  }
+  },
+  getPageSize: () => size.value,
+  setPageSize: (value) => { size.value = value }
 })
 
 const reload = () => {
+  page.value = 1
   load()
 }
 
 const dialog = ref(false)
 const editingId = ref<number | null>(null)
 const saving = ref(false)
-const centers = ref<any[]>([])
 const form = reactive<any>({
   code: '',
   name: '',
@@ -49,6 +55,7 @@ const form = reactive<any>({
   inspectionMode: 'NONE',
   enabled: true,
   workCenterId: null,
+  workCenterName: '',
   remark: ''
 })
 
@@ -92,7 +99,13 @@ const categoryOptions = Object.keys(categoryMap).map((value) => ({ value, label:
 const load = async () => {
   loading.value = true
   try {
-    rows.value = await api.get('/processes', { keyword: keyword.value })
+    const data = await api.get('/processes', {
+      keyword: keyword.value,
+      page: page.value,
+      size: size.value
+    })
+    rows.value = data?.records || []
+    total.value = data?.total || 0
   } finally {
     loading.value = false
   }
@@ -117,6 +130,7 @@ const openCreate = async () => {
     inspectionMode: 'NONE',
     enabled: true,
     workCenterId: null,
+    workCenterName: '',
     remark: ''
   })
   try {
@@ -138,6 +152,7 @@ const openEdit = (row: any) => {
     inspectionMode: row.inspectionMode || (row.needInspection ? 'ROUTING' : 'NONE'),
     enabled: row.enabled !== false,
     workCenterId: row.workCenterId || null,
+    workCenterName: row.workCenterName || '',
     remark: row.remark || ''
   })
   dialog.value = true
@@ -218,14 +233,9 @@ const remove = async (row: any) => {
   }
 }
 
-const loadCenters = async () => {
-  centers.value = await api.get('/work-centers/options')
-}
-
 onMounted(async () => {
   await table.load()
   await load()
-  await loadCenters()
 })
 </script>
 
@@ -241,11 +251,11 @@ onMounted(async () => {
 
     <div class="panel">
       <div class="filter-bar">
-        <el-input v-model="keyword" placeholder="工序编码 / 名称" clearable style="width: 240px" @keyup.enter="load" />
-        <el-button type="primary" plain @click="load">查询</el-button>
+        <el-input v-model="keyword" placeholder="工序编码 / 名称" clearable style="width: 240px" @keyup.enter="reload" />
+        <el-button type="primary" plain @click="reload">查询</el-button>
         <div class="spacer"></div>
         <TableToolbar :table="table" export-api="/processes" export-name="工序" @applied="reload" />
-        <span class="toolbar-tip">共 {{ rows.length }} 道工序</span>
+        <span class="toolbar-tip">共 {{ total }} 道工序</span>
       </div>
       <div class="table-wrap">
         <DataTable :table="table" :data="rows" :loading="loading">
@@ -294,6 +304,18 @@ onMounted(async () => {
       <div class="process-tip">
         提示：工序被工艺路线或工单引用后无法删除，请改为停用；停用后新建工艺路线时不再显示该工序。
       </div>
+
+      <div class="pager">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="size"
+          :total="total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next"
+          @current-change="load"
+          @size-change="load"
+        />
+      </div>
     </div>
 
     <el-dialog draggable append-to-body v-model="dialog" :title="editingId ? '编辑工序' : '新建工序'" width="560px">
@@ -317,14 +339,14 @@ onMounted(async () => {
             <el-input-number v-model="form.defaultPrice" :min="0" :precision="2" :step="0.5" style="width: 100%" />
           </el-form-item>
           <el-form-item label="执行工作中心">
-            <el-select v-model="form.workCenterId" clearable placeholder="不绑定" style="width: 100%">
-              <el-option
-                v-for="item in centers"
-                :key="item.id"
-                :label="`${item.name}（日产能 ${item.dailyCapacityMinutes} 分钟）`"
-                :value="item.id"
-              />
-            </el-select>
+            <ReferenceSelect
+              v-model="form.workCenterId"
+              url="/work-centers/options"
+              :initial-label="form.workCenterName"
+              clearable
+              placeholder="不绑定"
+              @select="(c) => (form.workCenterName = c ? c.name : '')"
+            />
           </el-form-item>
           <el-form-item label="检验方式" class="full">
             <el-radio-group v-model="form.inspectionMode">

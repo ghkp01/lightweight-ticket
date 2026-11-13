@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mes.common.BizException;
+import com.mes.common.PageResult;
 import com.mes.platform.scope.OrgScopeService;
 import com.mes.security.CurrentUser;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -114,6 +115,33 @@ public class CustomFieldService {
             definitions.add(definitionOf(row));
         }
         return definitions;
+    }
+
+    /** 自定义字段定义分页；不传 page 时仍走 definitions(entityType, includeDisabled) */
+    public PageResult definitionsPage(String entityType, boolean includeDisabled, int page, int size) {
+        String entity = requireEntity(entityType);
+        int safePage = Math.max(1, page);
+        int safeSize = Math.max(1, Math.min(size, 200));
+        String where = " where entity_type = ? " + (includeDisabled ? "" : " and enabled = true ");
+        Long total = jdbcTemplate.queryForObject(
+                "select count(*) from sys_custom_field" + where, Long.class, entity);
+        String sql = """
+                select id, entity_type, field_key, label, field_type, required,
+                       options::text as options, default_value::text as "defaultValue",
+                       sort_no, enabled, factory_org_id as "factoryOrgId",
+                       visible_roles::text as "visibleRoles",
+                       editable_roles::text as "editableRoles"
+                from sys_custom_field
+                """ + where + """
+                order by factory_org_id nulls first, sort_no, id
+                limit ? offset ?
+                """;
+        List<FieldDefinition> definitions = new ArrayList<>();
+        for (Map<String, Object> row : jdbcTemplate.queryForList(sql, entity,
+                safeSize, (long) (safePage - 1) * safeSize)) {
+            definitions.add(definitionOf(row));
+        }
+        return new PageResult(definitions, total == null ? 0 : total, safePage, safeSize);
     }
 
     public FieldDefinition definition(long id) {

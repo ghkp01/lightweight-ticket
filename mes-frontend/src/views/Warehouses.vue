@@ -8,6 +8,9 @@ import { useTableView } from '../composables/useTableView'
 
 const rows = ref<any[]>([])
 const loading = ref(false)
+const total = ref(0)
+const page = ref(1)
+const size = ref(20)
 
 // 表格视图：列显示 / 冻结 / 列宽按账号保存
 const table = useTableView({
@@ -25,6 +28,7 @@ const table = useTableView({
 })
 
 const reload = () => {
+  page.value = 1
   load()
 }
 
@@ -39,16 +43,26 @@ const typeLabel: Record<string, string> = { RAW: '原料仓', FINISHED: '成品�
 const load = async () => {
   loading.value = true
   try {
-    rows.value = await api.get('/warehouses')
+    const data = await api.get('/warehouses', {
+      page: page.value,
+      size: size.value
+    })
+    rows.value = data?.records || []
+    total.value = data?.total || 0
   } finally {
     loading.value = false
   }
 }
 
+const changePage = (value: number) => {
+  page.value = value
+  load()
+}
+
 // 多工厂：只让管理员把仓库挂到具体工厂，其余账号留空走默认工厂
 const loadPlants = async () => {
   try {
-    plants.value = (await api.get('/orgs', { type: 'PLANT' })) || []
+    plants.value = (await api.get('/orgs/options', { type: 'PLANT', limit: 50 })) || []
   } catch (e) {
     plants.value = []
   }
@@ -121,7 +135,15 @@ onMounted(async () => {
         <TableToolbar :table="table" export-api="/warehouses" export-name="仓库" @applied="reload" />
       </div>
       <div class="table-wrap" style="padding-top: 14px">
-        <DataTable :table="table" :data="rows" :loading="loading">
+        <DataTable
+          :table="table"
+          :data="rows"
+          :loading="loading"
+          :total="total"
+          :page="page"
+          :size="size"
+          @page-change="changePage"
+        >
           <template #cell-code="{ row }"><span class="mono">{{ row.code }}</span></template>
           <template #cell-type="{ row }">
             <span class="status-tag" :class="row.type === 'RAW' ? 'warning' : row.type === 'FINISHED' ? 'success' : 'info'">
@@ -162,7 +184,7 @@ onMounted(async () => {
           </el-select>
         </el-form-item>
         <el-form-item v-if="plants.length > 1" label="所属工厂">
-          <el-select v-model="form.factoryOrgId" clearable placeholder="留空则落到当前账号所属工厂" style="width: 100%">
+          <el-select v-model="form.factoryOrgId" clearable filterable placeholder="留空则落到当前账号所属工厂" style="width: 100%">
             <el-option v-for="plant in plants" :key="plant.id" :label="plant.name" :value="plant.id" />
           </el-select>
         </el-form-item>

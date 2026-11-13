@@ -29,7 +29,13 @@ public class OfflineController {
 
     @GetMapping("/recent")
     @PreAuthorize("hasAnyRole('ADMIN')")
-    public ApiResponse recent(@RequestParam(required = false) Integer limit) {
-        return ApiResponse.ok(service.recent(limit == null ? 50 : limit));
+    public ApiResponse recent(@RequestParam(required = false) String keyword,
+                             @RequestParam(required = false) Integer limit,
+                             @RequestParam(required = false) Integer page,
+                             @RequestParam(defaultValue = "20") int size) {
+        if (page != null) {
+            return ApiResponse.ok(service.page(keyword, page, size));
+        }
+        return ApiResponse.ok(service.recent(keyword, limit == null ? 50 : limit));
     }
 }

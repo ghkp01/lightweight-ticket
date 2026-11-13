@@ -89,28 +89,54 @@ public class NoticeService implements NoticePort {
         return mine(username, null, unreadOnly, limit);
     }
 
+    private static final String SELECT_SQL = """
+            select id, category, title, content, ref_type as "refType", ref_no as "refNo",
+                   read_at as "readAt", to_char(created_at, 'YYYY-MM-DD HH24:MI') as "createdAt"
+            from sys_notice where receiver = ?
+            """;
+
     /**
      * @param category TASK / ALERT / INFO，为空或 ALL 表示全部
      */
     public List<Map<String, Object>> mine(String username, String category, Boolean unreadOnly, int limit) {
         int safeLimit = Math.min(Math.max(limit, 1), 200);
-        StringBuilder sql = new StringBuilder("""
-                select id, category, title, content, ref_type as "refType", ref_no as "refNo",
-                       read_at as "readAt", to_char(created_at, 'YYYY-MM-DD HH24:MI') as "createdAt"
-                from sys_notice where receiver = ?
-                """);
         List<Object> args = new ArrayList<>();
         args.add(username);
+        String where = where(category, unreadOnly, args);
+        args.add(safeLimit);
+        return jdbcTemplate.queryForList(SELECT_SQL + where + " order by id desc limit ?", args.toArray());
+    }
+
+    /** 消息中心分页：每个人的消息会持续累积，列表页改为后端分页 */
+    public PageResult page(String username, String category, Boolean unreadOnly, int page, int size) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 200);
+        List<Object> countArgs = new ArrayList<>();
+        countArgs.add(username);
+        String countWhere = where(category, unreadOnly, countArgs);
+        Long total = jdbcTemplate.queryForObject(
+                "select count(*) from sys_notice where receiver = ? " + countWhere,
+                Long.class, countArgs.toArray());
+        List<Object> args = new ArrayList<>();
+        args.add(username);
+        String pageWhere = where(category, unreadOnly, args);
+        args.add(safeSize);
+        args.add((safePage - 1) * safeSize);
+        List<Map<String, Object>> records = jdbcTemplate.queryForList(
+                SELECT_SQL + pageWhere + " order by id desc limit ? offset ?", args.toArray());
+        return new PageResult(records, total == null ? 0 : total, safePage, safeSize);
+    }
+
+    private String where(String category, Boolean unreadOnly, List<Object> args) {
+        StringBuilder where = new StringBuilder();
         if (category != null && !category.isBlank() && !"ALL".equalsIgnoreCase(category.trim())) {
-            sql.append(" and category = ? ");
+            where.append(" and category = ? ");
             args.add(category.trim().toUpperCase(Locale.ROOT));
         }
         if (Boolean.TRUE.equals(unreadOnly)) {
-            sql.append(" and read_at is null ");
+            where.append(" and read_at is null ");
         }
-        sql.append(" order by id desc limit ?");
-        args.add(safeLimit);
-        return jdbcTemplate.queryForList(sql.toString(), args.toArray());
+        return where.toString();
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.mes.quality;
 
 import com.mes.common.BizException;
+import com.mes.common.PageResult;
 import com.mes.inventory.api.InventoryPort;
 import com.mes.masterdata.api.MasterDataPort;
 import com.mes.masterdata.api.MasterDataViews;
@@ -68,48 +69,86 @@ public class DefectService {
     public record DisposeRequest(@NotBlank String disposition, String remark) {
     }
 
+    private static final String SELECT_SQL = """
+            select d.id, d.defect_no as "defectNo", d.work_order_id as "workOrderId",
+                   d.operation_id as "operationId",
+                   d.process_id as "processId",
+                   d.product_id as "productId",
+                   d.qty, d.source, d.reason, d.disposition, d.status,
+                   d.rework_work_order_id as "reworkWorkOrderId",
+                   d.handled_by as "handledBy",
+                   to_char(d.handled_at, 'YYYY-MM-DD HH24:MI') as "handledAt",
+                   to_char(d.created_at, 'YYYY-MM-DD HH24:MI') as "createdAt",
+                   d.remark
+            from defect_record d
+            where 1 = 1
+            """;
+
     public List<Map<String, Object>> list(String status, String keyword, int limit) {
         int safeLimit = Math.min(Math.max(limit, 1), 500);
-        // 工单号属于生产、产品名属于 masterdata：各自换成 id 集合，正文里不再 join 别人的表
-        Set<Long> workOrderIds = workOrderPort.searchIds(keyword);
-        Set<Long> productIds = masterData.searchProductIds(keyword);
-        String workOrderCondition = workOrderIds.isEmpty()
-                ? "1 = 0"
-                : "d.work_order_id in (" + String.join(", ",
-                        java.util.Collections.nCopies(workOrderIds.size(), "?")) + ")";
-        String productCondition = productIds.isEmpty()
-                ? "1 = 0"
-                : "d.product_id in (" + String.join(", ",
-                        java.util.Collections.nCopies(productIds.size(), "?")) + ")";
-        StringBuilder sql = new StringBuilder("""
-                select d.id, d.defect_no as "defectNo", d.work_order_id as "workOrderId",
-                       d.operation_id as "operationId",
-                       d.process_id as "processId",
-                       d.product_id as "productId",
-                       d.qty, d.source, d.reason, d.disposition, d.status,
-                       d.rework_work_order_id as "reworkWorkOrderId",
-                       d.handled_by as "handledBy",
-                       to_char(d.handled_at, 'YYYY-MM-DD HH24:MI') as "handledAt",
-                       to_char(d.created_at, 'YYYY-MM-DD HH24:MI') as "createdAt",
-                       d.remark
-                from defect_record d
-                where 1 = 1
-                """);
         List<Object> args = new ArrayList<>();
+        StringBuilder sql = new StringBuilder(SELECT_SQL).append(where(status, keyword, args));
+        sql.append(" order by d.id desc limit ?");
+        args.add(safeLimit);
+        return enrich(jdbcTemplate.queryForList(sql.toString(), args.toArray()));
+    }
+
+    /** 不良台账分页：台账会随报工持续累积，列表页改为后端分页 */
+    public PageResult page(String status, String keyword, int page, int size) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 200);
+        KeywordIds ids = keywordIds(keyword);
+        List<Object> countArgs = new ArrayList<>();
+        StringBuilder countWhere = where(status, keyword, ids, countArgs);
+        Long total = jdbcTemplate.queryForObject(
+                "select count(*) from defect_record d where 1 = 1 " + countWhere,
+                Long.class, countArgs.toArray());
+        List<Object> args = new ArrayList<>();
+        StringBuilder pageWhere = where(status, keyword, ids, args);
+        args.add(safeSize);
+        args.add((safePage - 1) * safeSize);
+        List<Map<String, Object>> records = jdbcTemplate.queryForList(
+                SELECT_SQL + pageWhere + " order by d.id desc limit ? offset ?", args.toArray());
+        return new PageResult(enrich(records), total == null ? 0 : total, safePage, safeSize);
+    }
+
+    private record KeywordIds(Set<Long> workOrderIds, Set<Long> productIds) {
+    }
+
+    private KeywordIds keywordIds(String keyword) {
+        // 工单号属于生产、产品名属于 masterdata：各自换成 id 集合，正文里不再 join 别人的表
+        return new KeywordIds(workOrderPort.searchIds(keyword), masterData.searchProductIds(keyword));
+    }
+
+    private StringBuilder where(String status, String keyword, List<Object> args) {
+        return where(status, keyword, keywordIds(keyword), args);
+    }
+
+    private StringBuilder where(String status, String keyword, KeywordIds ids, List<Object> args) {
+        StringBuilder where = new StringBuilder();
         if (status != null && !status.isBlank()) {
-            sql.append(" and d.status = ? ");
+            where.append(" and d.status = ? ");
             args.add(status.trim().toUpperCase(Locale.ROOT));
         }
         if (keyword != null && !keyword.isBlank()) {
-            sql.append(" and (d.defect_no ilike ? or ").append(workOrderCondition)
+            String workOrderCondition = ids.workOrderIds().isEmpty()
+                    ? "1 = 0"
+                    : "d.work_order_id in (" + String.join(", ",
+                            java.util.Collections.nCopies(ids.workOrderIds().size(), "?")) + ")";
+            String productCondition = ids.productIds().isEmpty()
+                    ? "1 = 0"
+                    : "d.product_id in (" + String.join(", ",
+                            java.util.Collections.nCopies(ids.productIds().size(), "?")) + ")";
+            where.append(" and (d.defect_no ilike ? or ").append(workOrderCondition)
                     .append(" or ").append(productCondition).append(") ");
             args.add("%" + keyword.trim() + "%");
-            args.addAll(workOrderIds);
-            args.addAll(productIds);
+            args.addAll(ids.workOrderIds());
+            args.addAll(ids.productIds());
         }
-        sql.append(" order by d.id desc limit ?");
-        args.add(safeLimit);
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql.toString(), args.toArray());
+        return where;
+    }
+
+    private List<Map<String, Object>> enrich(List<Map<String, Object>> rows) {
         MasterDataViews.fillProductNames(masterData, rows);
         fillOperationAndProcess(rows);
         fillWorkNos(rows);

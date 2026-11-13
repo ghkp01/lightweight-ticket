@@ -19,9 +19,15 @@ const production = ref<any>({ summary: {}, daily: [], byOperation: [], byWorker:
 const month = ref(`${today.getFullYear()}-${pad(today.getMonth() + 1)}`)
 const payrollLoading = ref(false)
 const payroll = ref<any>({ summary: {}, rows: [] })
+const payrollTotal = ref(0)
+const payrollPage = ref(1)
+const payrollSize = ref(20)
 
 const deliveryLoading = ref(false)
 const deliveryRows = ref<any[]>([])
+const deliveryTotal = ref(0)
+const deliveryPage = ref(1)
+const deliverySize = ref(20)
 
 const loadedTabs = ref<Record<string, boolean>>({})
 
@@ -80,26 +86,61 @@ const loadPayroll = async () => {
   }
   payrollLoading.value = true
   try {
-    const data = await api.get('/reports/payroll', { month: month.value })
+    const data = await api.get('/reports/payroll', {
+      month: month.value,
+      page: payrollPage.value,
+      size: payrollSize.value
+    })
     payroll.value = {
       summary: data?.summary || {},
-      rows: data?.rows || []
+      rows: data?.records || data?.rows || []
     }
+    payrollTotal.value = data?.total ?? payroll.value.rows.length
     loadedTabs.value.payroll = true
   } finally {
     payrollLoading.value = false
   }
 }
 
+const reloadPayroll = () => {
+  payrollPage.value = 1
+  loadPayroll()
+}
+
+const changePayrollPage = (value: number) => {
+  payrollPage.value = value
+  loadPayroll()
+}
+
+const changePayrollSize = () => {
+  payrollPage.value = 1
+  loadPayroll()
+}
+
 const loadDelivery = async () => {
   deliveryLoading.value = true
   try {
-    const data = await api.get('/reports/delivery')
-    deliveryRows.value = Array.isArray(data) ? data : data?.records || []
+    const data = await api.get('/reports/delivery', {
+      page: deliveryPage.value,
+      size: deliverySize.value
+    })
+    const rows = Array.isArray(data) ? data : (data?.records || [])
+    deliveryRows.value = rows
+    deliveryTotal.value = Array.isArray(data) ? rows.length : (data?.total || 0)
     loadedTabs.value.delivery = true
   } finally {
     deliveryLoading.value = false
   }
+}
+
+const changeDeliveryPage = (value: number) => {
+  deliveryPage.value = value
+  loadDelivery()
+}
+
+const changeDeliverySize = () => {
+  deliveryPage.value = 1
+  loadDelivery()
 }
 
 const onTabChange = (name: any) => {
@@ -112,8 +153,9 @@ const csvCell = (value: any) => {
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
 }
 
-const exportPayroll = () => {
-  const rows = payroll.value.rows || []
+const exportPayroll = async () => {
+  const data = await api.get('/reports/payroll', { month: month.value })
+  const rows = data?.rows || []
   if (!rows.length) {
     ElMessage.warning('暂无可导出的计件工资数据')
     return
@@ -300,7 +342,7 @@ onMounted(() => {
               :clearable="false"
               style="width: 160px"
             />
-            <el-button type="primary" :loading="payrollLoading" @click="loadPayroll">查询</el-button>
+            <el-button type="primary" :loading="payrollLoading" @click="reloadPayroll">查询</el-button>
             <div class="spacer"></div>
             <el-button plain :disabled="!payroll.rows.length" @click="exportPayroll">
               <el-icon><Download /></el-icon>
@@ -330,10 +372,10 @@ onMounted(() => {
             <div class="panel sub-panel">
               <div class="card-head">
                 <div class="card-title">人员工资明细</div>
-                <span class="toolbar-tip">{{ month || '-' }} · 共 {{ payroll.rows.length }} 人</span>
+                <span class="toolbar-tip">{{ month || '-' }} · 共 {{ payrollTotal }} 人</span>
               </div>
               <div class="table-wrap">
-                <el-table :data="payroll.rows" size="small" show-summary empty-text="所选月份暂无报工">
+                <el-table :data="payroll.rows" size="small" empty-text="所选月份暂无报工">
                   <el-table-column label="人员" min-width="140">
                     <template #default="{ row }">
                       <span v-if="row.worker">{{ row.worker }}</span>
@@ -352,6 +394,17 @@ onMounted(() => {
                     </template>
                   </el-table-column>
                 </el-table>
+              </div>
+              <div class="pager">
+                <el-pagination
+                  v-model:current-page="payrollPage"
+                  v-model:page-size="payrollSize"
+                  :total="payrollTotal"
+                  :page-sizes="[10, 20, 50, 100]"
+                  layout="total, sizes, prev, pager, next"
+                  @current-change="changePayrollPage"
+                  @size-change="changePayrollSize"
+                />
               </div>
             </div>
             <div class="muted report-note">
@@ -372,7 +425,7 @@ onMounted(() => {
               <div class="card-head">
                 <div class="card-title">订单交期</div>
                 <span class="toolbar-tip">
-                  共 {{ deliveryRows.length }} 单 · 逾期 {{ deliveryRows.filter(isLate).length }} 单
+                  共 {{ deliveryTotal }} 单 · 本页逾期 {{ deliveryRows.filter(isLate).length }} 单
                 </span>
               </div>
               <div class="table-wrap">
@@ -409,6 +462,17 @@ onMounted(() => {
                     </template>
                   </el-table-column>
                 </el-table>
+              </div>
+              <div class="pager">
+                <el-pagination
+                  v-model:current-page="deliveryPage"
+                  v-model:page-size="deliverySize"
+                  :total="deliveryTotal"
+                  :page-sizes="[10, 20, 50, 100]"
+                  layout="total, sizes, prev, pager, next"
+                  @current-change="changeDeliveryPage"
+                  @size-change="changeDeliverySize"
+                />
               </div>
             </div>
           </div>
